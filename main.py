@@ -9,6 +9,7 @@ from ReadExcel import read_excel
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QGroupBox, QHBoxLayout, QLabel, QFileDialog
 from pyqtgraph.parametertree import Parameter, ParameterTree
 from TreeStructures.ResistanceSelection import ResistanceSelection
+from TreeStructures.ManualTriggering import ManualTriggering
 
 class MainWindow(Qt.QWidget):
     ''' Main Window '''
@@ -38,36 +39,31 @@ class MainWindow(Qt.QWidget):
 
         # ////////////////////// Inicialització dels primers dos group boxs /////////////////////////
 
-        self.groupBox1 = QGroupBox("Resistance Selection")
-        self.blockLayout1 = QVBoxLayout()
-        self.groupBox1.setLayout(self.blockLayout1)
+        self.groupBox = QGroupBox("Resistance Panel")
+        self.blockLayout = QVBoxLayout()
+        self.groupBox.setLayout(self.blockLayout)
 
         # Crear el árbol de parámetros
-        self.tree_resistances = ParameterTree()
+        self.ParameterTree_ResistancePanel = ParameterTree()
+
+        # Afegim al ParameterTree la ResistanceSelection
         self.ResistanceSelection = ResistanceSelection(name='Resistance Selection',
                                        title='Resistance Selection')
-        self.tree_resistances.setParameters(self.ResistanceSelection)
+        self.ParameterTree_ResistancePanel.addParameters(self.ResistanceSelection)
 
-        # Añadir el árbol al layout
-        self.blockLayout1.addWidget(self.tree_resistances)
-        self.layout.addWidget(self.groupBox1)
+        # Afegim al ParameterTree el ManualTriggering
+        self.ManualTriggering = ManualTriggering(name='Manual Triggering',
+                                                       title='Manual Triggering')
+        self.ParameterTree_ResistancePanel.addParameters(self.ManualTriggering)
 
+        self.ParameterTree_ResistancePanel.header().setSectionResizeMode(QtWidgets.QHeaderView.Interactive)
+        self.ParameterTree_ResistancePanel.setColumnWidth(0, 200)
 
-        self.groupBox2 = QGroupBox("Manual Triggering")
-        self.blockLayout2 = QVBoxLayout()
-        self.groupBox2.setLayout(self.blockLayout2)
+        # Afegim el ParameterTree al layout del GroupBox
+        self.blockLayout.addWidget(self.ParameterTree_ResistancePanel)
 
-        # Crear el árbol de parámetros
-        self.tree_manual = ParameterTree()
-
-        self.tree_manual.header().setSectionResizeMode(QtWidgets.QHeaderView.Interactive)
-        self.tree_manual.setColumnWidth(0, 200)
-
-        # Añadir el árbol al layout
-        self.blockLayout2.addWidget(self.tree_manual)
-
-        self.groupBox2.setMinimumSize(450, 200)
-        self.layout.addWidget(self.groupBox2)
+        # Afegim el GroupBox al layout de la GUI
+        self.layout.addWidget(self.groupBox)
 
         # /////////////////////// Tercer groupBox - LinMot Trigger ///////////////////////////////////
         # Afegim el linMot Drive Trigger
