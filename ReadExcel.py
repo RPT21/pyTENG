@@ -21,6 +21,6 @@ def read_excel(file_path):
     return parameterDict
 
 if __name__ == "__main__":
-    file_path = 'C:/Users/marre/OneDrive/Escritorio/TENGProject/ParameterFormat.xlsx'
-    print(list(read_excel(file_path).keys()))
+    file_path = 'C:/Users/rpieres/PycharmProjects/pyTENG/ParameterFormat.xlsx'
+    print(read_excel(file_path))
 

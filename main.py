@@ -8,6 +8,7 @@ from DAQTest import *
 from ReadExcel import read_excel
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QGroupBox, QHBoxLayout, QLabel, QFileDialog
 from pyqtgraph.parametertree import Parameter, ParameterTree
+from TreeStructures.ResistanceSelection import ResistanceSelection
 
 class MainWindow(Qt.QWidget):
     ''' Main Window '''
@@ -43,6 +44,9 @@ class MainWindow(Qt.QWidget):
 
         # Crear el árbol de parámetros
         self.tree_resistances = ParameterTree()
+        self.ResistanceSelection = ResistanceSelection(name='Resistance Selection',
+                                       title='Resistance Selection')
+        self.tree_resistances.setParameters(self.ResistanceSelection)
 
         # Añadir el árbol al layout
         self.blockLayout1.addWidget(self.tree_resistances)
