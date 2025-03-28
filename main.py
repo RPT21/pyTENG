@@ -20,7 +20,7 @@ class MainWindow(Qt.QWidget):
         self.xRunning = False
         self.task = CallbackTask()
 
-        self.setGeometry(650, 20, 450, 1200)
+        self.setGeometry(650, 20, 450, 1000)
         self.setWindowTitle('TENG Control Software')
 
         # Add objects to main window
