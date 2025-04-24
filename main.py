@@ -1,3 +1,5 @@
+from turtledemo.chaos import jumpto
+
 import PyDAQmx as Daq
 import sys
 import ctypes
@@ -63,7 +65,7 @@ class MainWindow(Qt.QWidget):
 
         # Configurem el ParameterTree
         self.ParameterTree_ControlPanel.header().setSectionResizeMode(QtWidgets.QHeaderView.Interactive)
-        self.ParameterTree_ControlPanel.setColumnWidth(0, 200)
+        self.ParameterTree_ControlPanel.setColumnWidth(0, 220)
 
         # Afegim el ParameterTree al layout del GroupBox
         self.blockLayout_ControlPanel.addWidget(self.ParameterTree_ControlPanel)
@@ -72,7 +74,16 @@ class MainWindow(Qt.QWidget):
         self.layout.addWidget(self.groupBox_ControlPanel)
 
     def on_btnStart(self):
+        # Example of accessing element
+        print(self.ResistancePanel.ResistanceSelection.child("Resistance 0").child("DAQ_CODE").value())
+
         if not self.xRunning:
+
+            measurement_list = list()
+            for child in self.ResistancePanel.ResistanceSelection.children():
+                measurement_list.append(child.value())
+            print(measurement_list)
+
             print("Start Measure")
             self.task.StartTask()
             self.btnAcq.setText('Stop Measure')
@@ -82,6 +93,7 @@ class MainWindow(Qt.QWidget):
             self.task.StopTask()
             self.btnAcq.setText('Start Measure')
             self.xRunning = False
+
 
     def on_loadParameters(self):
         options = QFileDialog.Options()
