@@ -102,6 +102,10 @@ class MainWindow(Qt.QWidget):
             if len(resistance_list) != 0:
                 self.MeasurementCore.startMeasuring(Resistance_list=resistance_list,
                                                    Recording_Configuration=recording_parameters_dict)
+            else:
+                print("Stopping Measurements, no resistance to measure")
+                self.btnAcq.setText('Start Measure')
+                self.MeasurementCore.stop()
 
         else:
             print("Stopping Measurements")

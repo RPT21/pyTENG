@@ -144,7 +144,7 @@ class ReadAnalog(DaqTaskBase):
         self.StopTask()
 
     def EveryNCallback(self):
-        # print('EveryN')
+        print('EveryN')
         read = c_int32()
         data = np.zeros((self.EverySamps, len(self.Channels)))
         self.ReadAnalogF64(self.EverySamps, 10.0,
@@ -158,7 +158,7 @@ class ReadAnalog(DaqTaskBase):
             self.EveryNEvent(data)
 
     def DoneCallback(self, status):
-        # print('Done')
+        print('Done')
         self.StopTask()
         self.UnregisterEveryNSamplesEvent()
         if self.DoneEvent:

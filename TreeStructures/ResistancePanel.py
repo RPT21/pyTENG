@@ -20,7 +20,7 @@ class ResistanceSelection(pTypes.GroupParameter):
                 children_value = dictionary_parameters[dict_keys[m]][n]
                 children_parameter = Parameter.create(**{'name': children_name,
                                                          'title': children_name,
-                                                         'type': 'float' if children_name is not "DAQ_CODE" else 'str',
+                                                         'type': 'float' if children_name != "DAQ_CODE" else 'str',
                                                          'value': children_value,
                                                          'expanded': False,
                                                          'readonly': True})

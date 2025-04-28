@@ -9,6 +9,12 @@ from ctypes import *
 import ctypes
 import sys
 
+def EveryNEventFunc(data):
+    print("Hello World!")
+
+def DoneEventFunc(data):
+    print("End of Work!")
+
 class MeasurementCore:
     def __init__(self):
         self.xRunning = False
@@ -25,16 +31,26 @@ class MeasurementCore:
                                                       "port0/line6",
                                                       "port0/line7"])
 
+        def DoneEventFunc(self, data):
+            None
+
+        ReadAnalog.DoneEvent = DoneEventFunc # Pass by reference
+        ReadAnalog.EveryNEvent = EveryNEventFunc # Pass by reference
+
     def startMeasuring(self, Resistance_list, Recording_Configuration):
         self.xRunning = True
         self.actualList = Resistance_list
         self.actualConfiguration = Recording_Configuration
 
         # Inicialitzem la primera mesura de la DAQ i deixem que la DAQ gestioni les altres mesures
-        Signal = [int(bit) for bit in Resistance_list[0]["DAQ_CODE"]].extend([1, 1])
+        # El [1, 1] del final és per afegir el trigger del LinMot i de la Raspberry.
+        digital_code = [int(bit) for bit in Resistance_list[0]["DAQ_CODE"]] + [1, 1]
+        Signal = np.array(digital_code, dtype=np.uint8)
         print("Signal:", Signal)
         self.DaqDigitalWrite.SetDigitalSignal(Signal)
 
+        # Comencem a medir les dades.
+        self.DaqAnalogRead.ReadData()
 
     def stop(self):
         self.xRunning = False
