@@ -1,9 +1,3 @@
-from turtledemo.chaos import jumpto
-
-import PyDAQmx as Daq
-import sys
-import ctypes
-from ctypes import byref, c_int32
 from PyQt5 import Qt
 from qtpy import QtWidgets
 from DAQTest import *
@@ -13,14 +7,26 @@ from pyqtgraph.parametertree import Parameter, ParameterTree
 from TreeStructures.ResistancePanel import ResistancePanel
 from TreeStructures.LinMotControl import LinMotControl
 from TreeStructures.RecordingParameters import RecordingParameters
+from MeasurementCore import MeasurementCore
+
+# Funció per convertir el Parameter en un diccionari
+def parameter_to_dict(param):
+    result = {}
+    for child in param.children():
+        if child.children():
+            # Si el fill té més fills, fem una trucada recursiva
+            result[child.name()] = parameter_to_dict(child)
+        else:
+            result[child.name()] = child.value()
+    return result
+
+
 class MainWindow(Qt.QWidget):
     ''' Main Window '''
 
     def __init__(self):
         super(MainWindow, self).__init__()
         self.layout = Qt.QVBoxLayout(self)
-        self.xRunning = False
-        self.task = CallbackTask()
 
         self.setGeometry(650, 20, 450, 1000)
         self.setWindowTitle('TENG Control Software')
@@ -73,27 +79,34 @@ class MainWindow(Qt.QWidget):
         # Afegim el GroupBox al layout de la GUI
         self.layout.addWidget(self.groupBox_ControlPanel)
 
+        # Definim la màquina d'estats per efectuar les mesures i la inicialitzem
+        self.MeasurementCore = MeasurementCore()
+
     def on_btnStart(self):
         # Example of accessing element
-        print(self.ResistancePanel.ResistanceSelection.child("Resistance 0").child("DAQ_CODE").value())
+        # print(self.ResistancePanel.ResistanceSelection.child("Resistance 0").child("DAQ_CODE").value())
 
-        if not self.xRunning:
+        if not self.MeasurementCore.xRunning:
 
-            measurement_list = list()
-            for child in self.ResistancePanel.ResistanceSelection.children():
-                measurement_list.append(child.value())
-            print(measurement_list)
-
-            print("Start Measure")
-            self.task.StartTask()
+            # Avisem a l'usuari que comencen les mesures
+            print("Starting Measurements")
             self.btnAcq.setText('Stop Measure')
-            self.xRunning = True
-        else:
-            print("Stop Measure")
-            self.task.StopTask()
-            self.btnAcq.setText('Start Measure')
-            self.xRunning = False
 
+            # Preparem els diccionaris amb les mesures que volem fer i els seus paràmetres
+            recording_parameters_dict = parameter_to_dict(self.RecordingParameters)
+            resistance_list = []
+            for child in self.ResistancePanel.ResistanceSelection.children():
+                if child.value():  # Si hem seleccionat la resistència, l'afegim a la llista
+                    resistance_list.append(parameter_to_dict(child))
+
+            if len(resistance_list) != 0:
+                self.MeasurementCore.startMeasuring(Resistance_list=resistance_list,
+                                                   Recording_Configuration=recording_parameters_dict)
+
+        else:
+            print("Stopping Measurements")
+            self.btnAcq.setText('Start Measure')
+            self.MeasurementCore.stop()
 
     def on_loadParameters(self):
         options = QFileDialog.Options()

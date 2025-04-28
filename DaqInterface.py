@@ -229,10 +229,10 @@ class WriteDigital(DaqTaskBase):
             self.CreateDOChan(Dev.format(Ch), "",
                               Daq.DAQmx_Val_ChanForAllLines)
 
-        self.DisableStartTrig()
+        # self.DisableStartTrig() - not aplicable to this DAQ-USB
         self.StopTask()
-        # print('INIT Digital OutPuts : ', self.taskHandle)
-        # print(Channels)
+        print('INIT Digital OutPuts : ', self.taskHandle)
+        print(Channels)
 
     def SetDigitalSignal(self, Signal):
         Sig = Signal.astype(np.uint8)
