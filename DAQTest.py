@@ -1,7 +1,10 @@
 from PyDAQmx import Task
 from PyDAQmx import *
+import PyDAQmx as Daq
 from numpy import zeros
 from ctypes import *
+import ctypes
+import sys
 
 """This example is a PyDAQmx version of the ContAcq_IntClk.c example
 It illustrates the use of callback functions
@@ -32,6 +35,29 @@ class CallbackTask(Task):
         print("Task finished with exit code", status)
         return 0 # The function should return an integer
 
+def GetDevName():
+    # Get Device Name of Daq Card
+    n = 1024
+    buff = ctypes.create_string_buffer(n)
+    Daq.DAQmxGetSysDevNames(buff, n)
+    if sys.version_info >= (3,):
+        value = buff.value.decode()
+    else:
+        value = buff.value
+
+    Dev = None
+    value = value.replace(' ', '')
+    for dev in value.split(','):
+        if dev.startswith('Sim'):
+            continue
+        Dev = dev + '/{}'
+
+    if Dev is None:
+        print('Error dev not found ', value)
+
+    return Dev
+
+
 if __name__ == "__main__":
     task=CallbackTask()
     task.StartTask()
@@ -43,3 +69,5 @@ if __name__ == "__main__":
     task.StopTask()
 
     task.ClearTask()
+
+    print(GetDevName().format(3))
