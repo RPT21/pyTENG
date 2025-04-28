@@ -20,7 +20,7 @@ do_task.StartTask()
 try:
     do_task.set_line(1)  # Encendemos la linea
     input("Presiona Enter para salir...")
-    do_task.set_line(0)
+    do_task.set_line(0) # Apaguem el pin digital (si no es diu explicit queda encès, encara que la tasca acabi)
 finally:
     do_task.StopTask()
     do_task.ClearTask()

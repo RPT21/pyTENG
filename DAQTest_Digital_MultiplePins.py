@@ -18,8 +18,10 @@ do_task = DigitalOutputTask()
 do_task.StartTask()
 
 try:
-    do_task.set_lines([1, 0, 1, 0, 0, 1, 0, 1])  # Encendemos algunas líneas
+    do_task.set_lines([0, 0, 0, 0, 0, 0, 0, 1])  # Encenem les linies
     input("Presiona Enter para salir...")
+    do_task.set_lines([0, 0, 0, 0, 0, 0, 0, 0])  # Apaguem les linies (necessari si no queda encès)
 finally:
     do_task.StopTask()
     do_task.ClearTask()
+
