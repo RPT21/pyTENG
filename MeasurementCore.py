@@ -9,11 +9,11 @@ from ctypes import *
 import ctypes
 import sys
 
-def EveryNEventFunc(data):
-    print("Hello World!")
+def EveryNEventFunc(Task_number, data):
+    print("Hello World!", Task_number)
 
-def DoneEventFunc(data):
-    print("End of Work!")
+def DoneEventFunc(Task_number, data):
+    print("End of Work!", Task_number)
 
 class MeasurementCore:
     def __init__(self):
@@ -30,9 +30,6 @@ class MeasurementCore:
                                                       "port0/line5",
                                                       "port0/line6",
                                                       "port0/line7"])
-
-        def DoneEventFunc(self, data):
-            None
 
         ReadAnalog.DoneEvent = DoneEventFunc # Pass by reference
         ReadAnalog.EveryNEvent = EveryNEventFunc # Pass by reference
