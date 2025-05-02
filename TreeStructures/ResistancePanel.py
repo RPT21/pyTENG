@@ -1,6 +1,5 @@
 import pyqtgraph.parametertree.parameterTypes as pTypes
-from PyQt5 import Qt
-from pyqtgraph.parametertree import Parameter, ParameterTree
+from pyqtgraph.parametertree import Parameter
 
 class ResistanceSelection(pTypes.GroupParameter):
     # Es equivalent a fer Parameter(type="group", ...)
@@ -63,7 +62,7 @@ class ManualTriggering(pTypes.GroupParameter):
         """Registra la señal sigValueChanged para un parámetro y sus hijos."""
         # sigValueChanged al connectar-lo a una funció, la truca enviant-li dos parametres: param, value.
         # Si volem que la funcio connectada accepti més parametres, utilitzem la funció lambda, la qual recull
-        # els dos parametres, i els redirigeix a la funcio que volem afegint els paràmetres addicionals.
+        # els dos parametres, i els redirigeix a la funcio que volem afegir els paràmetres addicionals.
         param.sigValueChanged.connect(lambda param, value: self.parameter_changed(param, value, block_name))
 
         if param.type() == 'group':

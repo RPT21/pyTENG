@@ -1,6 +1,4 @@
 import pyqtgraph.parametertree.parameterTypes as pTypes
-from PyQt5 import Qt
-from pyqtgraph.parametertree import Parameter, ParameterTree
 
 class RecordingParameters(pTypes.GroupParameter):
     # Es equivalent a fer Parameter(type="group", ...)
