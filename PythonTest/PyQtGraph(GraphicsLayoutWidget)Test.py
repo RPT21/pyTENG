@@ -2,7 +2,16 @@ import sys
 import numpy as np
 from PyQt5.QtWidgets import QApplication, QMainWindow
 import pyqtgraph as pg
+"""
+Container Classes (subclasses of QWidget; may be embedded in PyQt GUIs)
+    PlotWidget - A subclass of GraphicsView with a single PlotItem displayed. 
+                Most of the methods provided by PlotItem are also available through PlotWidget.
+                GraphicsView widget with a single PlotItem inside.
 
+    GraphicsLayoutWidget - QWidget subclass displaying a single GraphicsLayout. 
+                        Most of the methods provided by GraphicsLayout are also available through GraphicsLayoutWidget.
+                        This widget is an easy starting point for generating multi-panel figures.
+"""
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()

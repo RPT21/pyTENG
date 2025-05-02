@@ -2,8 +2,16 @@ import sys
 import numpy as np
 import pyqtgraph as pg
 from PyQt5.QtWidgets import QApplication, QMainWindow, QComboBox, QVBoxLayout, QWidget
+"""
+Container Classes (subclasses of QWidget; may be embedded in PyQt GUIs)
+    PlotWidget - A subclass of GraphicsView with a single PlotItem displayed. 
+                Most of the methods provided by PlotItem are also available through PlotWidget.
+                GraphicsView widget with a single PlotItem inside.
 
-
+    GraphicsLayoutWidget - QWidget subclass displaying a single GraphicsLayout. 
+                        Most of the methods provided by GraphicsLayout are also available through GraphicsLayoutWidget.
+                        This widget is an easy starting point for generating multi-panel figures.
+"""
 class GraphWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -40,7 +48,7 @@ class GraphWindow(QMainWindow):
         # Inicializar los datos de la gráfica
         self.x = np.linspace(0, 2 * np.pi, 1000)
         self.y = np.sin(self.x)  # Función inicial
-        self.plot = self.graphWidget.plot(self.x, self.y, pen=pg.mkPen(color='b', width=2))
+        self.plotItem = self.graphWidget.plot(self.x, self.y, pen=pg.mkPen(color='b', width=2))
 
     def update_plot(self):
         # Cambiar la función según la selección en el comboBox
@@ -55,7 +63,7 @@ class GraphWindow(QMainWindow):
             self.y = np.clip(self.y, -10, 10)
 
         # Actualizar la gráfica
-        self.plot.setData(self.x, self.y)
+        self.plotItem.setData(self.x, self.y)
 
 
 if __name__ == '__main__':
