@@ -1,6 +1,5 @@
 import sys
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
-import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
 
 class RadioButtonParameterWindow(QMainWindow):

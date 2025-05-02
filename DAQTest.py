@@ -1,8 +1,8 @@
-from PyDAQmx import Task
-from PyDAQmx import *
 import PyDAQmx as Daq
+import PyDAQmx.DAQmxConstants as const
+from PyDAQmx import Task
 from numpy import zeros
-from ctypes import *
+from ctypes import byref, c_int32
 import ctypes
 import sys
 
@@ -19,14 +19,14 @@ class CallbackTask(Task):
         Task.__init__(self)
         self.data = zeros(1000)
         self.a = []
-        self.CreateAIVoltageChan("Dev1/ai0","",DAQmx_Val_RSE,-10.0,10.0,DAQmx_Val_Volts,None)
-        self.CfgSampClkTiming("",10000.0,DAQmx_Val_Rising,DAQmx_Val_ContSamps,1000)
+        self.CreateAIVoltageChan("Dev1/ai0","",const.DAQmx_Val_RSE,-10.0,10.0,const.DAQmx_Val_Volts,None)
+        self.CfgSampClkTiming("",10000.0,const.DAQmx_Val_Rising,const.DAQmx_Val_ContSamps,1000)
         # self.CfgSampClkTiming("",10000.0,DAQmx_Val_Rising,DAQmx_Val_FiniteSamps,1000) # Nomes agafa 1000 mostres i finalitza amb DoneCallBack()
-        self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer,1000,0)
+        self.AutoRegisterEveryNSamplesEvent(const.DAQmx_Val_Acquired_Into_Buffer,1000,0)
         self.AutoRegisterDoneEvent(0)
     def EveryNCallback(self):
-        read = int32()
-        self.ReadAnalogF64(1000,10.0,DAQmx_Val_GroupByScanNumber,self.data,1000,byref(read),None)
+        read = c_int32()
+        self.ReadAnalogF64(1000,10.0,const.DAQmx_Val_GroupByScanNumber,self.data,1000,byref(read),None)
         self.a.extend(self.data.tolist())
         print(self.data[0])
         return 0 # The function should return an integer
@@ -64,7 +64,7 @@ if __name__ == "__main__":
 
     input('Acquiring samples continuously. Press Enter to interrupt\n')
 
-    # DoneCallback() no s'executa, això nomes atura la tasca. Aquest Callback només
+    # DoneCallback() no s'executa, això només atura la tasca. Aquest Callback només
     # s'executa si de forma natural la Task decideix finalitzar.
     task.StopTask()
 

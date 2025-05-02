@@ -1,8 +1,6 @@
 import sys
-import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QGroupBox, QHBoxLayout, QLabel
-
 
 class ParameterBlock(QWidget):
     """ Un bloque con un título y un ParameterTree dentro. """

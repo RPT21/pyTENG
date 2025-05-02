@@ -22,6 +22,7 @@ class MeasurementCore:
         self.actualConfiguration = dict()
         self.counter = 0
         self.DaqAnalogRead = ReadAnalog(InChans=["ai0"])
+        # Recordem que per accedir a les dades guardades hem de dir self.DaqDigitalWrite.Data (amb D majuscula)
         self.DaqDigitalWrite = WriteDigital(Channels=["port0/line0",
                                                       "port0/line1",
                                                       "port0/line2",
@@ -47,7 +48,7 @@ class MeasurementCore:
         self.DaqDigitalWrite.SetDigitalSignal(Signal)
 
         # Comencem a medir les dades.
-        self.DaqAnalogRead.ReadData()
+        self.DaqAnalogRead.ReadData(Fs=1000, nSamps=10000, EverySamps=1000)
 
     def stop(self):
         self.xRunning = False

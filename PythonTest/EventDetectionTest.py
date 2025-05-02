@@ -1,8 +1,6 @@
 import sys
 from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QPushButton, QGroupBox
-import pyqtgraph as pg
 from pyqtgraph.parametertree import Parameter, ParameterTree
-
 
 class DynamicParameterWindow(QMainWindow):
     def __init__(self):

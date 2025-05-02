@@ -1,32 +1,40 @@
-from PyQt5 import Qt
+# Importing PyQt(5 or 6 version) from qtpy (compatibility abstraction layer for different PyQt versions)
+# PyQt5 is an adapted version of C/C++ Qt framework for python to do GUI applications
 from qtpy import QtWidgets
-from DAQTest import *
-from ReadExcel import read_excel
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QGroupBox, QHBoxLayout, QLabel, QFileDialog
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QFileDialog, QPushButton
+
+# Importing pyqtgraph (module of C/C++ Qt framework) to do ParameterTree widgets and plotting
 from pyqtgraph.parametertree import Parameter, ParameterTree
+
+# Accessing python interpreter variables and functions
+import sys
+
+# Importing custom classes and functions
+from ReadExcel import read_excel
 from TreeStructures.ResistancePanel import ResistancePanel
 from TreeStructures.LinMotControl import LinMotControl
 from TreeStructures.RecordingParameters import RecordingParameters
 from MeasurementCore import MeasurementCore
 
-# Funció per convertir el Parameter en un diccionari
+
+# Function to convert a Parameter into a dict
 def parameter_to_dict(param):
     result = {}
     for child in param.children():
         if child.children():
-            # Si el fill té més fills, fem una trucada recursiva
+            # If it has more children inside, do recursive calls
             result[child.name()] = parameter_to_dict(child)
         else:
             result[child.name()] = child.value()
     return result
 
 
-class MainWindow(Qt.QWidget):
+class MainWindow(QWidget):
     ''' Main Window '''
 
     def __init__(self):
         super(MainWindow, self).__init__()
-        self.layout = Qt.QVBoxLayout(self)
+        self.layout = QVBoxLayout(self)
 
         self.setGeometry(650, 20, 450, 1000)
         self.setWindowTitle('TENG Control Software')
@@ -34,11 +42,11 @@ class MainWindow(Qt.QWidget):
         # Add objects to main window
 
         # start Button
-        self.btnAcq = Qt.QPushButton("Start Measure")
+        self.btnAcq = QPushButton("Start Measure")
         self.layout.addWidget(self.btnAcq)
 
         # load Button
-        self.btnLoad = Qt.QPushButton("Load Parameters")
+        self.btnLoad = QPushButton("Load Parameters")
         self.layout.addWidget(self.btnLoad)
 
         # Connect the button to a method

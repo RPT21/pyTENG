@@ -2,7 +2,6 @@ import sys
 import numpy as np
 import pyqtgraph as pg
 from PyQt5.QtWidgets import QApplication, QMainWindow, QComboBox, QVBoxLayout, QWidget
-from PyQt5.QtCore import Qt
 
 
 class GraphWindow(QMainWindow):
