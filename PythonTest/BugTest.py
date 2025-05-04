@@ -8,7 +8,7 @@ app = QApplication(sys.argv)
 
 # --- Create a valid type='list' parameter ---
 param_def = Parameter.create(name='params', type='group', children=[
-    {'name': 'BoardSel', 'type': 'list', 'values': ['uno', 'mega', 'nano'], 'value': 'mega'}
+    {'name': 'BoardSel', 'type': 'list', 'limits': ['uno', 'mega', 'nano'], 'value': 'mega'}
 ])
 
 # Verify that it has a valid value
