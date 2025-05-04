@@ -28,6 +28,6 @@ tree.setParameters(param_def, showTop=False)
 
 # Verify the value after loading it to the Parameter Tree
 print("AFTER calling setParameters:")
-print("  BoardSel value:", param_def.param('BoardSel').value())  # In older versions this is '' (bug error)
+print("  BoardSel value:", param_def.param('BoardSel').value())  # This is '' if using "values" instead of "limits"
 
 sys.exit(app.exec_())
