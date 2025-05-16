@@ -10,12 +10,15 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton
 from PyQt5.QtCore import QTimer, QObject, pyqtSignal
 import pyqtgraph as pg
 import threading
+import matplotlib.pyplot as plt
 
 from PyDAQmx import DAQmxResetDevice
-
+import pandas as pd
 DAQmxResetDevice("Dev1")
 
 moveLinMot = False
+
+saved_data = np.empty((0,))
 
 
 class DAQSignal(QObject):
@@ -75,9 +78,13 @@ class MainWindow(QMainWindow):
         self.button.clicked.connect(self.toggle_linmot)
 
     def update_plot(self, new_data):
+        global moveLinMot
+        global saved_data
         self.data = np.roll(self.data, -len(new_data))
         self.data[-len(new_data):] = new_data
         self.curve.setData(self.data)
+        if moveLinMot:
+            saved_data = np.append(saved_data, new_data)
 
     def toggle_linmot(self):
         global moveLinMot
@@ -89,12 +96,23 @@ class MainWindow(QMainWindow):
         self.button.setText("Apagar LinMot" if moveLinMot else "Encender LinMot")
 
     def closeEvent(self, event):
+        global saved_data
         # Detener la tarea DAQ
         self.daq.Stop()
         event.accept()
         self.do_task.set_line(0)
         self.do_task.StopTask()
         self.do_task.ClearTask()
+        time = np.linspace(0, 1/self.daq.samples_per_chunk, len(saved_data))
+        plt.figure(0)
+        plt.plot(time, saved_data)
+        plt.show()
+        df = pd.DataFrame({
+            'Time': time,
+            'DAQSignal': saved_data
+        })
+        df.to_excel(r"S:\TriboMedData\CharacterizationData\TENGData\Test.xlsx")
+
 
 
 class DigitalOutputTask(Task):
