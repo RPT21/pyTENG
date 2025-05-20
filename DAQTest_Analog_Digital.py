@@ -28,7 +28,7 @@ class DataAcquisitionTask(Task):
 
 
 class DigitalOutputTask(Task):
-    def __init__(self, line="Dev1/port0/line0"):
+    def __init__(self, line="Dev1/port0/line7"):
         Task.__init__(self)
         self.CreateDOChan(line, "", DAQmx_Val_ChanForAllLines)
 
@@ -55,6 +55,8 @@ if __name__ == "__main__":
                 do_task.set_line(0)  # Apagar
                 print("Pin digital: OFF")
     finally:
+        do_task.set_line(0)  # Apagar
+        print("Pin digital: OFF")
         ai_task.StopTask()
         ai_task.ClearTask()
         do_task.ClearTask()
