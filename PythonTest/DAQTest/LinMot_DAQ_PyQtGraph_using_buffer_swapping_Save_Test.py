@@ -2,7 +2,7 @@ import sys
 import numpy as np
 import pandas as pd
 import time
-from PyQt5.QtWidgets import QApplication, QMainWindow
+from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget
 from PyQt5.QtCore import QObject, pyqtSignal, QThread, QTimer
 import pyqtgraph as pg
 from PyDAQmx import Task
@@ -13,8 +13,9 @@ from PyDAQmx.DAQmxFunctions import *
 CHANNEL = "Dev1/ai0"
 SAMPLE_RATE = 1000
 SAMPLES_PER_CALLBACK = 100
-CALLBACKS_PER_BUFFER = 10
+CALLBACKS_PER_BUFFER = 100
 BUFFER_SIZE = SAMPLES_PER_CALLBACK * CALLBACKS_PER_BUFFER
+moveLinMot = False
 
 # ---------------- BUFFER PROCESSING THREAD ----------------
 class BufferProcessor(QObject):
@@ -26,11 +27,12 @@ class BufferProcessor(QObject):
         self.process_buffer.connect(self.save_data)
 
     def save_data(self, data):
-        t = np.arange(data.shape[0]) / self.fs
-        df = pd.DataFrame({"Time (s)": t, "Signal": data})
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        df.to_excel(f"data_{timestamp}.xlsx", index=False)
-        print(f"[+] Guardado {len(data)} muestras")
+        if moveLinMot:
+            t = np.arange(data.shape[0]) / self.fs
+            df = pd.DataFrame({"Time (s)": t, "Signal": data})
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            df.to_excel(f"data_{timestamp}.xlsx", index=False)
+            print(f"[+] Guardado {len(data)} muestras")
 
 # ---------------- DAQ TASK WITH CALLBACK ----------------
 class DAQTask(Task):
@@ -65,7 +67,7 @@ class DAQTask(Task):
 
         # Si está lleno, intercambia buffers y lanza señal de guardado
         if self.index >= BUFFER_SIZE:
-            full_buffer = self.current_buffer.copy()
+            full_buffer = self.current_buffer.copy()  # Crec que no fa falta fer el copy
             self.current_buffer = self.buffer1 if self.current_buffer is self.buffer2 else self.buffer2
             self.index = 0
             self.processor_signal.emit(full_buffer)
@@ -73,15 +75,22 @@ class DAQTask(Task):
         return 0
 
 # ---------------- INTERFAZ Y GRAFICA ----------------
-class MainWindow(QMainWindow):
+class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("DAQ Viewer")
+        self.layout = QVBoxLayout(self)
 
         self.plot_buffer = np.zeros(1000)
         self.plot_widget = pg.PlotWidget()
-        self.setCentralWidget(self.plot_widget)
+        #self.setCentralWidget(self.plot_widget)  # Only for QMainWindow
         self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
+
+        # Boton para controlar adquisicion:
+        self.button = QPushButton("Encender LinMot")
+        self.button.clicked.connect(self.toggle_linmot)
+        self.layout.addWidget(self.button)
+        self.layout.addWidget(self.plot_widget)
 
         # Procesador y hilo
         self.processor = BufferProcessor(SAMPLE_RATE)
@@ -89,8 +98,12 @@ class MainWindow(QMainWindow):
         self.processor.moveToThread(self.thread)
         self.thread.start()
 
-        # DAQ Task
+        # DAQ Analog Task
         self.task = DAQTask(self.plot_buffer, self.processor.process_buffer)
+
+        # DAQ Digital Task
+        self.do_task = DigitalOutputTask()
+        self.do_task.StartTask()
 
         # Temporizador para actualizar el plot
         self.timer = QTimer()
@@ -103,10 +116,36 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.task.StopTask()
         self.task.ClearTask()
+        self.do_task.set_line(0)
+        self.do_task.StopTask()
+        self.do_task.ClearTask()
         self.thread.quit()
         self.thread.wait()
         event.accept()
 
+    def toggle_linmot(self):
+        global moveLinMot
+        if moveLinMot:
+            self.do_task.set_line(0)
+            if self.task.index != 0:
+                data = self.task.current_buffer[0:self.task.index]
+                self.task.processor_signal.emit(data)
+                self.task.index = 0
+        else:
+            self.do_task.set_line(1)
+        moveLinMot = not moveLinMot
+        self.button.setText("Apagar LinMot" if moveLinMot else "Encender LinMot")
+
+
+class DigitalOutputTask(Task):
+    def __init__(self, line="Dev1/port0/line7"):
+        Task.__init__(self)
+        self.CreateDOChan(line, "", DAQmx_Val_ChanForAllLines)
+
+    def set_line(self, value):
+        """value = 0 (OFF) o 1 (ON)"""
+        data = np.array([value], dtype=np.uint8)
+        self.WriteDigitalLines(1, 1, 10.0, DAQmx_Val_GroupByChannel, data, None, None)
 # ---------------- MAIN ----------------
 if __name__ == '__main__':
     app = QApplication(sys.argv)
