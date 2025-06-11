@@ -2,7 +2,7 @@ import sys
 import numpy as np
 import pandas as pd
 import time
-from PyQt5.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
 from PyQt5.QtCore import QObject, pyqtSignal, QThread, QTimer
 import pyqtgraph as pg
 from PyDAQmx import Task
@@ -32,7 +32,7 @@ class BufferProcessor(QObject):
             df = pd.DataFrame({"Time (s)": t, "Signal": data})
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             df.to_excel(f"data_{timestamp}.xlsx", index=False)
-            print(f"[+] Guardado {len(data)} muestras")
+            print(f"[+] Saved {len(data)} samples")
 
 # ---------------- DAQ TASK WITH CALLBACK ----------------
 class DAQTask(Task):
@@ -41,7 +41,7 @@ class DAQTask(Task):
         self.plot_buffer = plot_buffer
         self.processor_signal = processor_signal
 
-        # Doble buffer
+        # Buffer swapping - double buffer
         self.buffer1 = np.empty(BUFFER_SIZE)
         self.buffer2 = np.empty(BUFFER_SIZE)
         self.current_buffer = self.buffer1
@@ -57,24 +57,31 @@ class DAQTask(Task):
         read = int32()
         self.ReadAnalogF64(SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, SAMPLES_PER_CALLBACK, byref(read), None)
 
-        # Actualiza el plot buffer
+        # Actualitza el buffer del plot
         self.plot_buffer[:] = np.roll(self.plot_buffer, -SAMPLES_PER_CALLBACK)
         self.plot_buffer[-SAMPLES_PER_CALLBACK:] = data
 
-        # Llena el buffer actual
+        # Omple el buffer actual
         self.current_buffer[self.index:self.index+SAMPLES_PER_CALLBACK] = data
         self.index += SAMPLES_PER_CALLBACK
 
-        # Si está lleno, intercambia buffers y lanza señal de guardado
+        # Si el buffer que la DAQ està utilitzant s'omple, envia un emit perquè es guardi en el disc i intercanvia
+        # els buffers, ara la DAQ escriu en l'altre buffer mentre el que està ple es guarda en el disc.
         if self.index >= BUFFER_SIZE:
-            full_buffer = self.current_buffer.copy()  # Crec que no fa falta fer el copy
+
+            # En principi el thread de guardar en disc és més ràpid, i tarda menys temps a guardar tot el buffer que el
+            # que tarda l'altre thread a omplir l'altre buffer i intercanviar-lo. Si aquesta condició es compleix sempre,
+            # no hi pot haver condició de carrera i aquest mètode hauria de funcionar. Llavors, no fa falta fer un copy().
+            # full_buffer = self.current_buffer.copy()
+
+            full_buffer = self.current_buffer
             self.current_buffer = self.buffer1 if self.current_buffer is self.buffer2 else self.buffer2
             self.index = 0
-            self.processor_signal.emit(full_buffer)
+            self.processor_signal.emit(full_buffer)  # Li passem la referència del buffer amb les dades
 
         return 0
 
-# ---------------- INTERFAZ Y GRAFICA ----------------
+# ---------------- INTERFACE AND PLOT  ----------------
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -83,16 +90,15 @@ class MainWindow(QWidget):
 
         self.plot_buffer = np.zeros(1000)
         self.plot_widget = pg.PlotWidget()
-        #self.setCentralWidget(self.plot_widget)  # Only for QMainWindow
         self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
 
-        # Boton para controlar adquisicion:
-        self.button = QPushButton("Encender LinMot")
+        # Adquisition control button:
+        self.button = QPushButton("START LinMot")
         self.button.clicked.connect(self.toggle_linmot)
         self.layout.addWidget(self.button)
         self.layout.addWidget(self.plot_widget)
 
-        # Procesador y hilo
+        # Buffer processor (save to disk) thread
         self.processor = BufferProcessor(SAMPLE_RATE)
         self.thread = QThread()
         self.processor.moveToThread(self.thread)
@@ -105,7 +111,7 @@ class MainWindow(QWidget):
         self.do_task = DigitalOutputTask()
         self.do_task.StartTask()
 
-        # Temporizador para actualizar el plot
+        # QTimer to update plot view
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_plot)
         self.timer.start(50)
@@ -134,7 +140,7 @@ class MainWindow(QWidget):
         else:
             self.do_task.set_line(1)
         moveLinMot = not moveLinMot
-        self.button.setText("Apagar LinMot" if moveLinMot else "Encender LinMot")
+        self.button.setText("STOP LinMot" if moveLinMot else "START LinMot")
 
 
 class DigitalOutputTask(Task):
@@ -146,6 +152,8 @@ class DigitalOutputTask(Task):
         """value = 0 (OFF) o 1 (ON)"""
         data = np.array([value], dtype=np.uint8)
         self.WriteDigitalLines(1, 1, 10.0, DAQmx_Val_GroupByChannel, data, None, None)
+
+
 # ---------------- MAIN ----------------
 if __name__ == '__main__':
     app = QApplication(sys.argv)
