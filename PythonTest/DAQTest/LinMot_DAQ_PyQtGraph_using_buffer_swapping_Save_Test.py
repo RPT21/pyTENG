@@ -25,10 +25,13 @@ class BufferProcessor(QObject):
         super().__init__()
         self.fs = fs
         self.process_buffer.connect(self.save_data)
+        self.timestamp = 0
 
     def save_data(self, data):
         if moveLinMot:
             t = np.arange(data.shape[0]) / self.fs
+            t += self.timestamp
+            self.timestamp = t[-1] + (t[1] - t[0])
             df = pd.DataFrame({"Time (s)": t, "Signal": data})
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             df.to_excel(f"data_{timestamp}.xlsx", index=False)
@@ -107,9 +110,21 @@ class MainWindow(QWidget):
         # DAQ Analog Task
         self.task = DAQTask(self.plot_buffer, self.processor.process_buffer)
 
-        # DAQ Digital Task
-        self.do_task = DigitalOutputTask()
-        self.do_task.StartTask()
+        # DAQ Digital Task LinMot
+        self.DO_task_LinMotTrigger = DigitalOutputTask(line="Dev1/port0/line7")
+        self.DO_task_LinMotTrigger.StartTask()
+
+        # DAQ Digital Task Prepare Raspberry
+        self.DO_task_PrepareRaspberry = DigitalOutputTask(line="Dev1/port0/line6")
+        self.DO_task_PrepareRaspberry.StartTask()
+
+        # Raspberry Read Task status bit 0
+        self.DI_task_Raspberry_status_0 = DigitalInputTask(line="Dev1/port1/line0")
+        self.DI_task_Raspberry_status_0.StartTask()
+
+        # Raspberry Read Task status bit 1
+        self.DI_task_Raspberry_status_1 = DigitalInputTask(line="Dev1/port1/line1")
+        self.DI_task_Raspberry_status_1.StartTask()
 
         # QTimer to update plot view
         self.timer = QTimer()
@@ -122,9 +137,21 @@ class MainWindow(QWidget):
     def closeEvent(self, event):
         self.task.StopTask()
         self.task.ClearTask()
-        self.do_task.set_line(0)
-        self.do_task.StopTask()
-        self.do_task.ClearTask()
+
+        self.DO_task_LinMotTrigger.set_line(0)
+        self.DO_task_LinMotTrigger.StopTask()
+        self.DO_task_LinMotTrigger.ClearTask()
+
+        self.DO_task_PrepareRaspberry.set_line(0)
+        self.DO_task_PrepareRaspberry.StopTask()
+        self.DO_task_PrepareRaspberry.ClearTask()
+
+        self.DI_task_Raspberry_status_0.StopTask()
+        self.DI_task_Raspberry_status_0.ClearTask()
+
+        self.DI_task_Raspberry_status_1.StopTask()
+        self.DI_task_Raspberry_status_1.ClearTask()
+
         self.thread.quit()
         self.thread.wait()
         event.accept()
@@ -132,13 +159,41 @@ class MainWindow(QWidget):
     def toggle_linmot(self):
         global moveLinMot
         if moveLinMot:
-            self.do_task.set_line(0)
+            # Stop LinMot and save data
+            self.DO_task_LinMotTrigger.set_line(0)
+            self.DO_task_PrepareRaspberry.set_line(0)
             if self.task.index != 0:
                 data = self.task.current_buffer[0:self.task.index]
                 self.task.processor_signal.emit(data)
                 self.task.index = 0
         else:
-            self.do_task.set_line(1)
+            # Start LinMot and reset buffer index counter
+            self.DO_task_PrepareRaspberry.set_line(1)
+
+            loop_counter = 0
+
+            while loop_counter < 10000:
+                status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
+                status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
+
+                if status_bit_0 == 0 and status_bit_1 == 0:
+                    loop_counter += 1
+                elif status_bit_0 == 1 and status_bit_1 == 0: # OK and no error
+                    break
+                elif status_bit_0 == 0 and status_bit_1 == 1: # NOT OK and error
+                    self.DO_task_PrepareRaspberry.set_line(0)
+                    raise Exception("Error, impossible to prepare raspberry to record")
+                else:
+                    self.DO_task_PrepareRaspberry.set_line(0)
+                    raise Exception("Error, EtherCAT bus is not working")
+
+            if loop_counter >= 10000:
+                self.DO_task_PrepareRaspberry.set_line(0)
+                raise Exception("Error loop counter overflow")
+
+            self.task.index = 0  # Reset buffer index
+            self.DO_task_LinMotTrigger.set_line(1)
+
         moveLinMot = not moveLinMot
         self.button.setText("STOP LinMot" if moveLinMot else "START LinMot")
 
@@ -147,11 +202,23 @@ class DigitalOutputTask(Task):
     def __init__(self, line="Dev1/port0/line7"):
         Task.__init__(self)
         self.CreateDOChan(line, "", DAQmx_Val_ChanForAllLines)
+        self.set_line(0)
 
     def set_line(self, value):
         """value = 0 (OFF) o 1 (ON)"""
         data = np.array([value], dtype=np.uint8)
         self.WriteDigitalLines(1, 1, 10.0, DAQmx_Val_GroupByChannel, data, None, None)
+
+class DigitalInputTask(Task):
+    def __init__(self, line="Dev1/port1/line0"):
+        Task.__init__(self)
+        self.CreateDIChan(line, "", DAQmx_Val_ChanForAllLines)
+
+    def read_line(self):
+        data = np.zeros((1,), dtype=np.uint8)
+        read = c_int32()
+        self.ReadDigitalLines(1, 10.0, 0, data, 1, read, None, None)
+        return data[0]
 
 
 # ---------------- MAIN ----------------
