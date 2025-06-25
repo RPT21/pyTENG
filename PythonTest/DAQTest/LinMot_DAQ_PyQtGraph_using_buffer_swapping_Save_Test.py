@@ -8,6 +8,10 @@ import pyqtgraph as pg
 from PyDAQmx import Task
 from PyDAQmx.DAQmxConstants import *
 from PyDAQmx.DAQmxFunctions import *
+import tkinter as tk
+from tkinter import filedialog
+import os
+from RaspberryInterface import RaspberryInterface
 
 # ---------------- CONFIG ----------------
 CHANNEL = "Dev1/ai0"
@@ -26,6 +30,7 @@ class BufferProcessor(QObject):
         self.fs = fs
         self.process_buffer.connect(self.save_data)
         self.timestamp = 0
+        self.local_path = None
 
     def save_data(self, data):
         if moveLinMot:
@@ -34,7 +39,7 @@ class BufferProcessor(QObject):
             self.timestamp = t[-1] + (t[1] - t[0])
             df = pd.DataFrame({"Time (s)": t, "Signal": data})
             timestamp = time.strftime("%Y%m%d_%H%M%S")
-            df.to_excel(f"data_{timestamp}.xlsx", index=False)
+            df.to_excel(os.path.join(self.local_path, f"DAQ_{timestamp}.xlsx"), index=False)
             print(f"[+] Saved {len(data)} samples")
 
 # ---------------- DAQ TASK WITH CALLBACK ----------------
@@ -94,6 +99,20 @@ class MainWindow(QWidget):
         self.plot_buffer = np.zeros(1000)
         self.plot_widget = pg.PlotWidget()
         self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
+
+        hostname = "192.168.100.200"
+        port = 22
+        username = "TENG"
+        password = "raspberry"
+
+        self.remote_path = "/var/opt/codesys/PlcLogic/FTP_Folder"
+
+        self.raspberry = RaspberryInterface(hostname=hostname,
+                                       port=port,
+                                       username=username,
+                                       password=password)
+
+        self.raspberry.connect()
 
         # Adquisition control button:
         self.button = QPushButton("START LinMot")
@@ -166,7 +185,39 @@ class MainWindow(QWidget):
                 data = self.task.current_buffer[0:self.task.index]
                 self.task.processor_signal.emit(data)
                 self.task.index = 0
+
+            loop_counter = 0
+
+            while loop_counter < 10000:
+                status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
+                status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
+
+                if status_bit_0 == 0 and status_bit_1 == 0:
+                    break
+                else:
+                    loop_counter += 1
+
+            if loop_counter >= 10000:
+                raise Exception("Error loop counter overflow")
+
+            self.raspberry.download_folder(self.remote_path, local_path=self.processor.local_path)
+            self.raspberry.remove_files_with_extension(self.remote_path)
         else:
+            # Get file save location from user:
+            print("Please provide a save location for incoming data.")
+            root = tk.Tk()
+            root.withdraw()  # Amaga la finestra princial de tkinter
+            root.lift()  # Posa la finestra emergent en primer pla
+            root.attributes('-topmost', True)  # La finestra sempre al davant
+
+            self.processor.local_path = filedialog.askdirectory()
+
+            if self.processor.local_path:
+                self.processor.local_path = self.processor.local_path.replace("/", "\\")
+            else:
+                print("Canceled")
+                return
+
             # Start LinMot and reset buffer index counter
             self.DO_task_PrepareRaspberry.set_line(1)
 
