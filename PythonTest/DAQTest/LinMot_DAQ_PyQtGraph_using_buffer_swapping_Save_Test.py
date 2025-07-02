@@ -14,7 +14,7 @@ import os
 from RaspberryInterface import RaspberryInterface
 
 # ---------------- CONFIG ----------------
-CHANNEL = "Dev1/ai0"
+CHANNEL = "Dev1/ai2"
 SAMPLE_RATE = 1000
 SAMPLES_PER_CALLBACK = 100
 CALLBACKS_PER_BUFFER = 100
