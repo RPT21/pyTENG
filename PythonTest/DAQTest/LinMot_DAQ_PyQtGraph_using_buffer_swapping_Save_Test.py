@@ -236,7 +236,8 @@ class MainWindow(QWidget):
                     raise Exception("Error, impossible to prepare raspberry to record")
                 else:
                     self.DO_task_PrepareRaspberry.set_line(0)
-                    raise Exception("Error, EtherCAT bus is not working")
+                    self.raspberry.reset_codesys()
+                    raise Exception("Error, EtherCAT bus is not working, it has been reset, try again")
 
             if loop_counter >= 10000:
                 self.DO_task_PrepareRaspberry.set_line(0)
