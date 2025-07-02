@@ -14,9 +14,9 @@ import os
 from RaspberryInterface import RaspberryInterface
 
 # ---------------- CONFIG ----------------
-CHANNEL_TENG = "Dev1/ai0"
-CHANNEL_LINMOT_ENABLE = "Dev1/ai1"
-CHANNEL_LINMOT_UP_DOWN = "Dev1/ai5"
+CHANNEL_LINMOT_ENABLE = "Dev1/ai0"
+CHANNEL_LINMOT_UP_DOWN = "Dev1/ai1"
+CHANNEL_TENG = "Dev1/ai2"
 
 SAMPLE_RATE = 1000
 SAMPLES_PER_CALLBACK = 100
@@ -59,7 +59,8 @@ class DAQTask(Task):
         self.current_buffer = self.buffer1
         self.index = 0
 
-        self.CreateAIVoltageChan(f"{CHANNEL_TENG},{CHANNEL_LINMOT_ENABLE},{CHANNEL_LINMOT_UP_DOWN}", "", DAQmx_Val_Cfg_Default, -10.0, 10.0, DAQmx_Val_Volts, None)
+        self.CreateAIVoltageChan(f"{CHANNEL_LINMOT_ENABLE},{CHANNEL_LINMOT_UP_DOWN}", "", DAQmx_Val_RSE, -10.0, 10.0, DAQmx_Val_Volts, None)
+        self.CreateAIVoltageChan(f"{CHANNEL_TENG}", "", DAQmx_Val_Diff, -10.0, 10.0, DAQmx_Val_Volts, None)
         self.CfgSampClkTiming("", SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, SAMPLES_PER_CALLBACK)
         self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, SAMPLES_PER_CALLBACK, 0)
         self.StartTask()
@@ -69,15 +70,17 @@ class DAQTask(Task):
         read = int32()
         self.ReadAnalogF64(SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, SAMPLES_PER_CALLBACK * 3, byref(read), None)
 
-        TENG_channel = data[0::3]
+        # Sembla que l'ordre és la del CreateAIVoltageChan
+
+        LinMot_enable = data[0::3]
+        LinMot_enable[LinMot_enable < 2] = 0
+        LinMot_enable[LinMot_enable > 2] = 1
 
         LinMot_up_down = data[1::3]
-        # LinMot_up_down[LinMot_up_down < 2] = 0
-        # LinMot_up_down[LinMot_up_down > 2] = 1
+        LinMot_up_down[LinMot_up_down < 2] = 0
+        LinMot_up_down[LinMot_up_down > 2] = 1
 
-        LinMot_enable = data[2::3]
-        # LinMot_enable[LinMot_enable < 2] = 0
-        # LinMot_enable[LinMot_enable > 2] = 1
+        TENG_channel = data[2::3]
 
         # Actualitza el buffer del plot
         self.plot_buffer[:] = np.roll(self.plot_buffer, -SAMPLES_PER_CALLBACK)

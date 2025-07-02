@@ -55,7 +55,7 @@ class DAQTask(Task):
         self.current_buffer = self.buffer1
         self.index = 0
 
-        self.CreateAIVoltageChan(CHANNEL, "", DAQmx_Val_Cfg_Default, -10.0, 10.0, DAQmx_Val_Volts, None)
+        self.CreateAIVoltageChan(CHANNEL, "", DAQmx_Val_Diff, -10.0, 10.0, DAQmx_Val_Volts, None)
         self.CfgSampClkTiming("", SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, SAMPLES_PER_CALLBACK)
         self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, SAMPLES_PER_CALLBACK, 0)
         self.StartTask()
