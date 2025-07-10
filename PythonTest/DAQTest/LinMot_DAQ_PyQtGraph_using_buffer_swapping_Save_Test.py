@@ -15,10 +15,11 @@ from RaspberryInterface import RaspberryInterface
 
 # ---------------- CONFIG ----------------
 CHANNEL = "Dev1/ai2"
-SAMPLE_RATE = 1000
-SAMPLES_PER_CALLBACK = 100
-CALLBACKS_PER_BUFFER = 100
+SAMPLE_RATE = 100000
+SAMPLES_PER_CALLBACK = 1000
+CALLBACKS_PER_BUFFER = 1000
 BUFFER_SIZE = SAMPLES_PER_CALLBACK * CALLBACKS_PER_BUFFER
+PLOT_BUFFER_SIZE = BUFFER_SIZE / SAMPLE_RATE
 moveLinMot = False
 
 # ---------------- BUFFER PROCESSING THREAD ----------------
@@ -96,7 +97,7 @@ class MainWindow(QWidget):
         self.setWindowTitle("DAQ Viewer")
         self.layout = QVBoxLayout(self)
 
-        self.plot_buffer = np.zeros(1000)
+        self.plot_buffer = np.zeros(SAMPLE_RATE)
         self.plot_widget = pg.PlotWidget()
         self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
 
