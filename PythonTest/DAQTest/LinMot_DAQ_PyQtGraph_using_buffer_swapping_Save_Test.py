@@ -19,7 +19,10 @@ SAMPLE_RATE = 100000
 SAMPLES_PER_CALLBACK = 1000
 CALLBACKS_PER_BUFFER = 1000
 BUFFER_SIZE = SAMPLES_PER_CALLBACK * CALLBACKS_PER_BUFFER
-PLOT_BUFFER_SIZE = BUFFER_SIZE / SAMPLE_RATE
+
+TimeWindowLength = 10 # In seconds
+PLOT_BUFFER_SIZE = int(SAMPLE_RATE * TimeWindowLength)
+
 moveLinMot = False
 
 # ---------------- BUFFER PROCESSING THREAD ----------------
@@ -97,7 +100,7 @@ class MainWindow(QWidget):
         self.setWindowTitle("DAQ Viewer")
         self.layout = QVBoxLayout(self)
 
-        self.plot_buffer = np.zeros(SAMPLE_RATE)
+        self.plot_buffer = np.zeros(PLOT_BUFFER_SIZE)
         self.plot_widget = pg.PlotWidget()
         self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
 

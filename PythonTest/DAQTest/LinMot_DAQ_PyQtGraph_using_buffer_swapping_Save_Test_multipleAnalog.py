@@ -22,6 +22,7 @@ SAMPLE_RATE = 1000
 SAMPLES_PER_CALLBACK = 100
 CALLBACKS_PER_BUFFER = 100
 BUFFER_SIZE = SAMPLES_PER_CALLBACK * CALLBACKS_PER_BUFFER
+PLOT_BUFFER_SIZE = 10000
 moveLinMot = False
 
 # ---------------- BUFFER PROCESSING THREAD ----------------
@@ -37,11 +38,11 @@ class BufferProcessor(QObject):
 
     def save_data(self, data):
         if moveLinMot:
-            t = np.arange(BUFFER_SIZE) / self.fs
+            t = np.arange(data.shape[0]) / self.fs
             t += self.timestamp
             self.timestamp = t[-1] + (t[1] - t[0])
-            # print(t.shape, data[0].shape, data[1].shape, data[2].shape)
-            df = pd.DataFrame({"Time (s)": t, "Signal": data[0], "LINMOT_ENABLE": data[1], "LINMOT_UP_DOWN": data[2]})
+            # print(t.shape, data[:,0].shape, data[:,1].shape, data[:,2].shape)
+            df = pd.DataFrame({"Time (s)": t, "Signal": data[:,0], "LINMOT_ENABLE": data[:,1], "LINMOT_UP_DOWN": data[:,2]})
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             df.to_excel(os.path.join(self.local_path, f"DAQ_{timestamp}.xlsx"), index=False)
             print(f"[+] Saved {BUFFER_SIZE} samples")
@@ -54,8 +55,8 @@ class DAQTask(Task):
         self.processor_signal = processor_signal
 
         # Buffer swapping - double buffer
-        self.buffer1 = np.empty((3, BUFFER_SIZE))
-        self.buffer2 = np.empty((3, BUFFER_SIZE))
+        self.buffer1 = np.empty((BUFFER_SIZE, 3))
+        self.buffer2 = np.empty((BUFFER_SIZE, 3))
         self.current_buffer = self.buffer1
         self.index = 0
 
@@ -66,30 +67,28 @@ class DAQTask(Task):
         self.StartTask()
 
     def EveryNCallback(self):
-        data = np.zeros((SAMPLES_PER_CALLBACK * 3, ), dtype=np.float64)  # We are reading 3 channels
+        data = np.empty((SAMPLES_PER_CALLBACK, 3), dtype=np.float64)  # We are reading 3 channels
         read = int32()
-        self.ReadAnalogF64(SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, SAMPLES_PER_CALLBACK * 3, byref(read), None)
+        self.ReadAnalogF64(SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, data.size, byref(read), None)
 
         # Sembla que l'ordre és la del CreateAIVoltageChan
 
-        LinMot_enable = data[0::3]
-        LinMot_enable[LinMot_enable < 2] = 0
-        LinMot_enable[LinMot_enable > 2] = 1
+        # LinMot_enable = data[:,0]
+        # LinMot_enable[LinMot_enable < 2] = 0
+        # LinMot_enable[LinMot_enable > 2] = 1
 
-        LinMot_up_down = data[1::3]
-        LinMot_up_down[LinMot_up_down < 2] = 0
-        LinMot_up_down[LinMot_up_down > 2] = 1
+        # LinMot_up_down = data[:,1]
+        # LinMot_up_down[LinMot_up_down < 2] = 0
+        # LinMot_up_down[LinMot_up_down > 2] = 1
 
-        TENG_channel = data[2::3]
+        TENG_channel = data[:,2]
 
         # Actualitza el buffer del plot
         self.plot_buffer[:] = np.roll(self.plot_buffer, -SAMPLES_PER_CALLBACK)
         self.plot_buffer[-SAMPLES_PER_CALLBACK:] = TENG_channel
 
         # Omple el buffer actual, alerta que les dades les ordena per odre del pin analogic
-        self.current_buffer[0, self.index:self.index+SAMPLES_PER_CALLBACK] = TENG_channel
-        self.current_buffer[1, self.index:self.index + SAMPLES_PER_CALLBACK] = LinMot_enable
-        self.current_buffer[2, self.index:self.index + SAMPLES_PER_CALLBACK] = LinMot_up_down
+        self.current_buffer[self.index:self.index+SAMPLES_PER_CALLBACK, :] = data
         self.index += SAMPLES_PER_CALLBACK
 
         # Si el buffer que la DAQ està utilitzant s'omple, envia un emit perquè es guardi en el disc i intercanvia
@@ -115,7 +114,7 @@ class MainWindow(QWidget):
         self.setWindowTitle("DAQ Viewer")
         self.layout = QVBoxLayout(self)
 
-        self.plot_buffer = np.zeros(1000)
+        self.plot_buffer = np.zeros(PLOT_BUFFER_SIZE)
         self.plot_widget = pg.PlotWidget()
         self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
 
