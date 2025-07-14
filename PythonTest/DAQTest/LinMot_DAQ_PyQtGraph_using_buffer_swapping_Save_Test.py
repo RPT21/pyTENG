@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import time
 from PyQt5.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
-from PyQt5.QtCore import QObject, pyqtSignal, QThread, QTimer
+from PyQt5.QtCore import QObject, pyqtSignal, QThread, QTimer, Qt
 import pyqtgraph as pg
 from PyDAQmx import Task
 from PyDAQmx.DAQmxConstants import *
@@ -15,13 +15,14 @@ from RaspberryInterface import RaspberryInterface
 
 # ---------------- CONFIG ----------------
 CHANNEL = "Dev1/ai2"
-SAMPLE_RATE = 100000
-SAMPLES_PER_CALLBACK = 1000
-CALLBACKS_PER_BUFFER = 1000
+SAMPLE_RATE = 10000
+SAMPLES_PER_CALLBACK = 100  # Modulates the adquisition frequency
+CALLBACKS_PER_BUFFER = 500 # Modulates when to save data
 BUFFER_SIZE = SAMPLES_PER_CALLBACK * CALLBACKS_PER_BUFFER
 
-TimeWindowLength = 10 # In seconds
-PLOT_BUFFER_SIZE = int(SAMPLE_RATE * TimeWindowLength)
+TimeWindowLength = 3 # In seconds
+PLOT_BUFFER_SIZE = ((SAMPLE_RATE * TimeWindowLength) // SAMPLES_PER_CALLBACK) * SAMPLES_PER_CALLBACK
+refresh_rate = 10
 
 moveLinMot = False
 
@@ -32,16 +33,21 @@ class BufferProcessor(QObject):
     def __init__(self, fs):
         super().__init__()
         self.fs = fs
-        self.process_buffer.connect(self.save_data)
+        self.process_buffer.connect(self.save_data, type=Qt.QueuedConnection)
         self.timestamp = 0
         self.local_path = None
 
     def save_data(self, data):
         if moveLinMot:
+            print(f"Save called in thread: {QThread.currentThread()}")
+            # y compara con el hilo principal:
+            print(f"Main thread: {QApplication.instance().thread()}")
             t = np.arange(data.shape[0]) / self.fs
             t += self.timestamp
             self.timestamp = t[-1] + (t[1] - t[0])
+            print("Time array done")
             df = pd.DataFrame({"Time (s)": t, "Signal": data})
+            print("Dataframe done")
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             df.to_excel(os.path.join(self.local_path, f"DAQ_{timestamp}.xlsx"), index=False)
             print(f"[+] Saved {len(data)} samples")
@@ -50,7 +56,12 @@ class BufferProcessor(QObject):
 class DAQTask(Task):
     def __init__(self, plot_buffer, processor_signal):
         super().__init__()
+
+        # Plot buffer - Circular buffer
         self.plot_buffer = plot_buffer
+        self.write_index = 0
+
+        # Function to save the data
         self.processor_signal = processor_signal
 
         # Buffer swapping - double buffer
@@ -70,11 +81,28 @@ class DAQTask(Task):
         self.ReadAnalogF64(SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, SAMPLES_PER_CALLBACK, byref(read), None)
 
         # Actualitza el buffer del plot
-        self.plot_buffer[:] = np.roll(self.plot_buffer, -SAMPLES_PER_CALLBACK)
-        self.plot_buffer[-SAMPLES_PER_CALLBACK:] = data
+
+        # if self.write_index + SAMPLES_PER_CALLBACK < self.plot_buffer.size:
+        #     self.plot_buffer[self.write_index:self.write_index + SAMPLES_PER_CALLBACK] = data
+        #     self.write_index += SAMPLES_PER_CALLBACK
+        # else:
+        #     difference = PLOT_BUFFER_SIZE - (self.write_index + SAMPLES_PER_CALLBACK)
+        #     self.plot_buffer[self.write_index:self.write_index + difference] = data[:difference]
+        #     if difference > 0:
+        #         self.plot_buffer[0:SAMPLES_PER_CALLBACK-difference] = data[SAMPLES_PER_CALLBACK-difference:]
+        #         self.write_index = SAMPLES_PER_CALLBACK-difference
+        #     else:
+        #         self.write_index = 0
+
+        # Making the buffer a multiple of SAMPLES_PER_CALLBACK
+        self.plot_buffer[self.write_index:self.write_index + SAMPLES_PER_CALLBACK] = data
+        self.write_index += SAMPLES_PER_CALLBACK
+
+        if self.write_index == self.plot_buffer.size:
+            self.write_index = 0
 
         # Omple el buffer actual
-        self.current_buffer[self.index:self.index+SAMPLES_PER_CALLBACK] = data
+        self.current_buffer[self.index:self.index + SAMPLES_PER_CALLBACK] = data
         self.index += SAMPLES_PER_CALLBACK
 
         # Si el buffer que la DAQ està utilitzant s'omple, envia un emit perquè es guardi en el disc i intercanvia
@@ -100,7 +128,8 @@ class MainWindow(QWidget):
         self.setWindowTitle("DAQ Viewer")
         self.layout = QVBoxLayout(self)
 
-        self.plot_buffer = np.zeros(PLOT_BUFFER_SIZE)
+        self.plot_buffer = np.zeros(PLOT_BUFFER_SIZE, dtype=float)
+
         self.plot_widget = pg.PlotWidget()
         self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
 
@@ -152,10 +181,15 @@ class MainWindow(QWidget):
         # QTimer to update plot view
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_plot)
-        self.timer.start(50)
+        self.timer.start(refresh_rate)
 
     def update_plot(self):
-        self.curve.setData(self.plot_buffer)
+        # Mostrar la señal "moviéndose" a la izquierda
+        display_data = np.concatenate((
+        self.plot_buffer[self.task.write_index:],
+        self.plot_buffer[:self.task.write_index]
+        ))
+        self.curve.setData(display_data)
 
     def closeEvent(self, event):
         self.task.StopTask()
