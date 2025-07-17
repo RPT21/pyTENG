@@ -2,8 +2,9 @@ import sys
 import numpy as np
 import pandas as pd
 import time
+import threading
 from PyQt5.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
-from PyQt5.QtCore import QObject, pyqtSignal, QThread, QTimer, Qt
+from PyQt5.QtCore import QObject, pyqtSignal, QThread, QTimer, pyqtSlot
 import pyqtgraph as pg
 from PyDAQmx import Task
 from PyDAQmx.DAQmxConstants import *
@@ -28,28 +29,31 @@ moveLinMot = False
 
 # ---------------- BUFFER PROCESSING THREAD ----------------
 class BufferProcessor(QObject):
-    process_buffer = pyqtSignal(np.ndarray)
+    process_buffer = pyqtSignal(object)
 
     def __init__(self, fs):
         super().__init__()
         self.fs = fs
-        self.process_buffer.connect(self.save_data, type=Qt.QueuedConnection)
+        self.process_buffer.connect(self.save_data)
         self.timestamp = 0
         self.local_path = None
 
+    @pyqtSlot(object)  # Decorador necessari perquè la funció no s'executi des de el thread que la crida sino des del thread on viu l'objecte
     def save_data(self, data):
         if moveLinMot:
-            print(f"Save called in thread: {QThread.currentThread()}")
-            # y compara con el hilo principal:
-            print(f"Main thread: {QApplication.instance().thread()}")
+
+            # ### Compare threads
+            # print(f"\nSave called in thread: {QThread.currentThread()}")
+            # print(f"Main thread: {QApplication.instance().thread()}")
+            # print("Are they the same thread? ... ", QThread.currentThread() == QApplication.instance().thread(),"\n")
+
             t = np.arange(data.shape[0]) / self.fs
             t += self.timestamp
             self.timestamp = t[-1] + (t[1] - t[0])
-            print("Time array done")
             df = pd.DataFrame({"Time (s)": t, "Signal": data})
-            print("Dataframe done")
             timestamp = time.strftime("%Y%m%d_%H%M%S")
-            df.to_excel(os.path.join(self.local_path, f"DAQ_{timestamp}.xlsx"), index=False)
+            # df.to_excel(os.path.join(self.local_path, f"DAQ_{timestamp}.xlsx"), index=False)  # No funciona per adquisicions ràpides
+            df.to_pickle(os.path.join(self.local_path, f"DAQ_{timestamp}.pkl"))
             print(f"[+] Saved {len(data)} samples")
 
 # ---------------- DAQ TASK WITH CALLBACK ----------------
@@ -76,6 +80,11 @@ class DAQTask(Task):
         self.StartTask()
 
     def EveryNCallback(self):
+
+        ### Compare threads
+        # print("Current Thread:", threading.current_thread())
+        # print("Qt Thread:", QThread.currentThread())
+
         data = np.zeros(SAMPLES_PER_CALLBACK, dtype=np.float64)
         read = int32()
         self.ReadAnalogF64(SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, SAMPLES_PER_CALLBACK, byref(read), None)
