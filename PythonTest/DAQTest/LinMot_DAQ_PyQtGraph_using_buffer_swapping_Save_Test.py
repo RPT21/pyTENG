@@ -14,6 +14,12 @@ from tkinter import filedialog
 import os
 from RaspberryInterface import RaspberryInterface
 
+# ### Buffers to test the speed of two diferent methods, numpy roll function or circular buffer.
+# plot_array = np.zeros(1000)
+# inip = 0
+# buffer_display_array = np.zeros(1000)
+# inibd = 0
+
 # ---------------- CONFIG ----------------
 CHANNEL = "Dev1/ai2"
 SAMPLE_RATE = 10000
@@ -56,6 +62,9 @@ class BufferProcessor(QObject):
             df.to_pickle(os.path.join(self.local_path, f"DAQ_{timestamp}.pkl"))
             print(f"[+] Saved {len(data)} samples")
 
+
+
+
 # ---------------- DAQ TASK WITH CALLBACK ----------------
 class DAQTask(Task):
     def __init__(self, plot_buffer, processor_signal):
@@ -89,7 +98,9 @@ class DAQTask(Task):
         read = int32()
         self.ReadAnalogF64(SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, SAMPLES_PER_CALLBACK, byref(read), None)
 
-        # Actualitza el buffer del plot
+        ### Actualitza el buffer del plot (circular buffer method)
+
+        # inicio = time.perf_counter()
 
         # if self.write_index + SAMPLES_PER_CALLBACK < self.plot_buffer.size:
         #     self.plot_buffer[self.write_index:self.write_index + SAMPLES_PER_CALLBACK] = data
@@ -110,7 +121,20 @@ class DAQTask(Task):
         if self.write_index == self.plot_buffer.size:
             self.write_index = 0
 
-        # Omple el buffer actual
+        # ### Actualitza el buffer del plot (numpy roll function method)
+        # self.plot_buffer[:] = np.roll(self.plot_buffer, -SAMPLES_PER_CALLBACK)
+        # self.plot_buffer[-SAMPLES_PER_CALLBACK:] = data
+
+        # ### Testing code speed
+        # fin = time.perf_counter()
+        # global inibd
+        # if inibd < 1000:
+        #     plot_array[inibd] = fin - inicio
+        #     inibd += 1
+        # else:
+        #     print(f"plot_array mean: {np.mean(plot_array):.9f}")
+
+        ### Save data into the current buffer
         self.current_buffer[self.index:self.index + SAMPLES_PER_CALLBACK] = data
         self.index += SAMPLES_PER_CALLBACK
 
@@ -193,12 +217,29 @@ class MainWindow(QWidget):
         self.timer.start(refresh_rate)
 
     def update_plot(self):
-        # Mostrar la señal "moviéndose" a la izquierda
+
+        # ini_plot = time.perf_counter()
+
+        ### Display DAQ signal (using circular buffer method)
         display_data = np.concatenate((
         self.plot_buffer[self.task.write_index:],
         self.plot_buffer[:self.task.write_index]
         ))
         self.curve.setData(display_data)
+
+
+        # ### Display DAQ signal (using numpy roll function method)
+        # self.curve.setData(self.plot_buffer)
+
+        # end_plot = time.perf_counter()
+
+        # ### Testing Display speed
+        # global inip
+        # if inip < 1000:
+        #     buffer_display_array[inip] = end_plot - ini_plot
+        #     inip += 1
+        # else:
+        #     print(f"Buffer display mean: {np.mean(buffer_display_array):.9f}")
 
     def closeEvent(self, event):
         self.task.StopTask()
@@ -276,11 +317,14 @@ class MainWindow(QWidget):
 
                 if status_bit_0 == 0 and status_bit_1 == 0:
                     loop_counter += 1
-                elif status_bit_0 == 1 and status_bit_1 == 0: # OK and no error
+                elif status_bit_0 == 1 and status_bit_1 == 0:  # OK and no error
                     break
-                elif status_bit_0 == 0 and status_bit_1 == 1: # NOT OK and error
+                elif status_bit_0 == 0 and status_bit_1 == 1:  # NOT OK and error
                     self.DO_task_PrepareRaspberry.set_line(0)
-                    raise Exception("Error, impossible to prepare raspberry to record")
+                    self.raspberry.reset_codesys()
+                    raise Exception(
+                        "Error, impossible to prepare raspberry to record, check codesys invalid license error. "
+                        "Codesys has been reset, try again")
                 else:
                     self.DO_task_PrepareRaspberry.set_line(0)
                     self.raspberry.reset_codesys()
