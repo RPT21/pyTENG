@@ -7,24 +7,33 @@ import time
 import tkinter as tk
 from tkinter import filedialog
 
+from PyQt5.QtCore import QObject, QThread, pyqtSignal, pyqtSlot
 
-class RaspberryInterface:
-    
+class RaspberryInterface(QObject):
+
+    execute = pyqtSignal(object)
+
     def __init__(self, hostname, port, username, password, 
                  codesys_folder="/var/opt/codesys/PlcLogic/FTP_Folder"):
 
+        super().__init__()
         self.hostname = hostname
         self.port = port
         self.username = username
         self.password = password
         self.codesys_folder = codesys_folder
         self.current_path = str(Path("__file__").resolve().parent)
+        self.execute.connect(self.run_function)
         
         # Create SSH client
         self.ssh = paramiko.SSHClient()
         
         # Automatically add unknown hosts
         self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+    @pyqtSlot(object)
+    def run_function(self, function):
+        function()
 
     def shutdown(self):
         stdin, stdout, stderr = self.ssh.exec_command("sudo poweroff")
@@ -65,6 +74,7 @@ class RaspberryInterface:
     def reset_codesys(self):
         self.stop_codesys()
         self.start_codesys()
+        print("Codesys has been reset succesfully")
         
     def check_file_integrity(self, local_path, remote_path):
         
