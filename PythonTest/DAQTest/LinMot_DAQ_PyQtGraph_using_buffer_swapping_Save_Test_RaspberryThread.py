@@ -269,6 +269,7 @@ class MainWindow(QWidget):
 
     def toggle_linmot(self):
         global moveLinMot
+
         if moveLinMot:
             # Stop LinMot and save data
             self.DO_task_LinMotTrigger.set_line(0)
@@ -290,10 +291,12 @@ class MainWindow(QWidget):
                     loop_counter += 1
 
             if loop_counter >= 10000:
-                raise Exception("Error loop counter overflow")
+                print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
+                return
 
             self.raspberry.execute.emit(lambda: self.raspberry.download_folder(self.remote_path, local_path=self.processor.local_path))
             self.raspberry.execute.emit(lambda: self.raspberry.remove_files_with_extension(self.remote_path))
+
         else:
             # Get file save location from user:
             print("Please provide a save location for incoming data.")
@@ -338,7 +341,7 @@ class MainWindow(QWidget):
 
             if loop_counter >= 10000:
                 self.DO_task_PrepareRaspberry.set_line(0)
-                print("\033[91mError loop counter overflow\033[0m")
+                print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
                 return
 
             self.task.index = 0  # Reset buffer index
