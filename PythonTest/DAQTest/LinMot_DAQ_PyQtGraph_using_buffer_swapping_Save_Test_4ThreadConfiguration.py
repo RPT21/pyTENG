@@ -14,6 +14,13 @@ from tkinter import filedialog
 import os
 from RaspberryInterface import RaspberryInterface
 
+# In this script we will try to work with 4 Threads:
+
+# 1) Main Thread - Doing screen refresh and managing Window events like button clicks, etc...
+# 2) AnalogRead Thread - Reading DAQ Analog Readings
+# 3) DigitalIO and Raspberry Thread - Reading and Sending digital signals and doing the communication with Raspberry
+# 4) Save Thread - Saving the data into the disk
+
 # ### Buffers to test the speed of two diferent methods, numpy roll function or circular buffer.
 # plot_array = np.zeros(1000)
 # inip = 0
@@ -21,10 +28,7 @@ from RaspberryInterface import RaspberryInterface
 # inibd = 0
 
 # ---------------- CONFIG ----------------
-CHANNEL_LINMOT_ENABLE = "Dev1/ai0"
-CHANNEL_LINMOT_UP_DOWN = "Dev1/ai1"
-CHANNEL_TENG = "Dev1/ai2"
-
+CHANNEL = "Dev1/ai2"
 SAMPLE_RATE = 10000
 SAMPLES_PER_CALLBACK = 100  # Modulates the adquisition frequency
 CALLBACKS_PER_BUFFER = 500 # Modulates when to save data
@@ -59,8 +63,7 @@ class BufferProcessor(QObject):
             t = np.arange(data.shape[0]) / self.fs
             t += self.timestamp
             self.timestamp = t[-1] + (t[1] - t[0])
-            # print(t.shape, data[:,0].shape, data[:,1].shape, data[:,2].shape)
-            df = pd.DataFrame({"Time (s)": t, "Signal": data[:,0], "LINMOT_ENABLE": data[:,1], "LINMOT_UP_DOWN": data[:,2]})
+            df = pd.DataFrame({"Time (s)": t, "Signal": data})
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             # df.to_excel(os.path.join(self.local_path, f"DAQ_{timestamp}.xlsx"), index=False)  # No funciona per adquisicions ràpides
             df.to_pickle(os.path.join(self.local_path, f"DAQ_{timestamp}.pkl"))
@@ -80,14 +83,12 @@ class DAQTask(Task):
         self.processor_signal = processor_signal
 
         # Buffer swapping - double buffer
-        self.buffer1 = np.empty((BUFFER_SIZE, 3))
-        self.buffer2 = np.empty((BUFFER_SIZE, 3))
+        self.buffer1 = np.empty(BUFFER_SIZE)
+        self.buffer2 = np.empty(BUFFER_SIZE)
         self.current_buffer = self.buffer1
         self.index = 0
 
-        self.CreateAIVoltageChan(f"{CHANNEL_LINMOT_ENABLE},{CHANNEL_LINMOT_UP_DOWN}", "", DAQmx_Val_RSE, -10.0, 10.0,
-                                 DAQmx_Val_Volts, None)
-        self.CreateAIVoltageChan(f"{CHANNEL_TENG}", "", DAQmx_Val_Diff, -10.0, 10.0, DAQmx_Val_Volts, None)
+        self.CreateAIVoltageChan(CHANNEL, "", DAQmx_Val_Diff, -10.0, 10.0, DAQmx_Val_Volts, None)
         self.CfgSampClkTiming("", SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, SAMPLES_PER_CALLBACK)
         self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, SAMPLES_PER_CALLBACK, 0)
         self.StartTask()
@@ -98,21 +99,9 @@ class DAQTask(Task):
         # print("Current Thread:", threading.current_thread())
         # print("Qt Thread:", QThread.currentThread())
 
-        data = np.empty((SAMPLES_PER_CALLBACK, 3), dtype=np.float64)  # We are reading 3 channels
+        data = np.zeros(SAMPLES_PER_CALLBACK, dtype=np.float64)
         read = int32()
-        self.ReadAnalogF64(SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, data.size, byref(read), None)
-
-        # Sembla que l'ordre és la del CreateAIVoltageChan
-
-        # LinMot_enable = data[:,0]
-        # LinMot_enable[LinMot_enable < 2] = 0
-        # LinMot_enable[LinMot_enable > 2] = 1
-
-        # LinMot_up_down = data[:,1]
-        # LinMot_up_down[LinMot_up_down < 2] = 0
-        # LinMot_up_down[LinMot_up_down > 2] = 1
-
-        TENG_channel = data[:, 2]
+        self.ReadAnalogF64(SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, SAMPLES_PER_CALLBACK, byref(read), None)
 
         ### Actualitza el buffer del plot (circular buffer method)
 
@@ -131,7 +120,7 @@ class DAQTask(Task):
         #         self.write_index = 0
 
         # Making the buffer a multiple of SAMPLES_PER_CALLBACK
-        self.plot_buffer[self.write_index:self.write_index + SAMPLES_PER_CALLBACK] = TENG_channel
+        self.plot_buffer[self.write_index:self.write_index + SAMPLES_PER_CALLBACK] = data
         self.write_index += SAMPLES_PER_CALLBACK
 
         if self.write_index == self.plot_buffer.size:
@@ -151,7 +140,7 @@ class DAQTask(Task):
         #     print(f"plot_array mean: {np.mean(plot_array):.9f}")
 
         ### Save data into the current buffer
-        self.current_buffer[self.index:self.index+SAMPLES_PER_CALLBACK, :] = data  # Esta malament
+        self.current_buffer[self.index:self.index + SAMPLES_PER_CALLBACK] = data
         self.index += SAMPLES_PER_CALLBACK
 
         # Si el buffer que la DAQ està utilitzant s'omple, envia un emit perquè es guardi en el disc i intercanvia
