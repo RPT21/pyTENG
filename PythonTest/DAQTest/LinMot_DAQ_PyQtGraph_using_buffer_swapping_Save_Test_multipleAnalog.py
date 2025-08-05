@@ -42,7 +42,7 @@ class BufferProcessor(QObject):
             t += self.timestamp
             self.timestamp = t[-1] + (t[1] - t[0])
             # print(t.shape, data[:,0].shape, data[:,1].shape, data[:,2].shape)
-            df = pd.DataFrame({"Time (s)": t, "Signal": data[:,0], "LINMOT_ENABLE": data[:,1], "LINMOT_UP_DOWN": data[:,2]})
+            df = pd.DataFrame({"Time (s)": t, "Signal": data[:,2], "LINMOT_ENABLE": data[:,0], "LINMOT_UP_DOWN": data[:,1]})
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             df.to_excel(os.path.join(self.local_path, f"DAQ_{timestamp}.xlsx"), index=False)
             print(f"[+] Saved {BUFFER_SIZE} samples")
