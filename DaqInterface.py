@@ -113,7 +113,7 @@ class ReadAnalog(DaqTaskBase):
         # print('INIT Analog Inputs : ', self.taskHandle)
         # print(self.Channels)
 
-    def ReadData(self, Fs=1000, nSamps=10000, EverySamps=1000):
+    def ReadData(self, Fs=1000, nSamps=10000, EverySamps=1000):  # Read nSamps of data
         self.Fs = Fs
         self.EverySamps = EverySamps
         self.Data = Buffer2D(BufferSize=nSamps, nChannels=len(self.Channels))
@@ -125,7 +125,7 @@ class ReadAnalog(DaqTaskBase):
                                             self.EverySamps, 0)
         self.StartTask()
 
-    def ReadContData(self, Fs, EverySamps, **kwargs):
+    def ReadContData(self, Fs, EverySamps, **kwargs):  # Read unlimited amount of data
         self.Fs = Fs
         self.EverySamps = np.int32(EverySamps)
         self.Data = None

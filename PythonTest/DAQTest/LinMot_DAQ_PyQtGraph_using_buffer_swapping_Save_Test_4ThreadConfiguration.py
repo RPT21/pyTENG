@@ -38,22 +38,21 @@ TimeWindowLength = 3 # In seconds
 PLOT_BUFFER_SIZE = ((SAMPLE_RATE * TimeWindowLength) // SAMPLES_PER_CALLBACK) * SAMPLES_PER_CALLBACK
 refresh_rate = 10
 
-moveLinMot = False
-
 # ---------------- BUFFER PROCESSING THREAD ----------------
 class BufferProcessor(QObject):
     process_buffer = pyqtSignal(object)
 
-    def __init__(self, fs):
+    def __init__(self, fs, mainWindowReference):
         super().__init__()
         self.fs = fs
         self.process_buffer.connect(self.save_data)
         self.timestamp = 0
         self.local_path = None
+        self.mainWindow = mainWindowReference
 
     @pyqtSlot(object)  # Decorador necessari perquè la funció no s'executi des de el thread que la crida sino des del thread on viu l'objecte
     def save_data(self, data):
-        if moveLinMot:
+        if self.mainWindow.moveLinMot:
 
             # ### Compare threads
             # print(f"\nSave called in thread: {QThread.currentThread()}")
@@ -159,17 +158,16 @@ class DAQTask(Task):
 
         return 0
 
-# ---------------- INTERFACE AND PLOT  ----------------
-class MainWindow(QWidget):
-    def __init__(self):
+class DeviceCommunicator(QObject):
+
+    start_adquisition_signal = pyqtSignal()
+    stop_adquisition_signal = pyqtSignal()
+    toggle_linmot_signal = pyqtSignal()
+
+    def __init__(self, mainWindowReference):
         super().__init__()
-        self.setWindowTitle("DAQ Viewer")
-        self.layout = QVBoxLayout(self)
 
-        self.plot_buffer = np.zeros(PLOT_BUFFER_SIZE, dtype=float)
-
-        self.plot_widget = pg.PlotWidget()
-        self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
+        self.mainWindow = mainWindowReference
 
         hostname = "192.168.100.200"
         port = 22
@@ -189,20 +187,11 @@ class MainWindow(QWidget):
 
         self.raspberry.execute.emit(lambda: self.raspberry.connect())
 
-        # Adquisition control button:
-        self.button = QPushButton("START LinMot")
-        self.button.clicked.connect(self.toggle_linmot)
-        self.layout.addWidget(self.button)
-        self.layout.addWidget(self.plot_widget)
-
-        # Buffer processor (save to disk) thread
-        self.processor = BufferProcessor(SAMPLE_RATE)
-        self.thread = QThread()
-        self.processor.moveToThread(self.thread)
-        self.thread.start()
+        self.start_adquisition_signal.connect(self.start_adquisition)
+        self.stop_adquisition_signal.connect(self.stop_adquisition)
 
         # DAQ Analog Task
-        self.task = DAQTask(self.plot_buffer, self.processor.process_buffer)
+        self.task = DAQTask(self.mainWindow.plot_buffer, self.mainWindow.processor.process_buffer)
 
         # DAQ Digital Task LinMot
         self.DO_task_LinMotTrigger = DigitalOutputTask(line="Dev1/port0/line7")
@@ -220,6 +209,129 @@ class MainWindow(QWidget):
         self.DI_task_Raspberry_status_1 = DigitalInputTask(line="Dev1/port1/line1")
         self.DI_task_Raspberry_status_1.StartTask()
 
+    @pyqtSlot()
+    def start_adquisition(self):
+
+        print("Starting adquisition")
+
+        # Get file save location from user:
+        print("Please provide a save location for incoming data.")
+        root = tk.Tk()
+        root.withdraw()  # Amaga la finestra princial de tkinter
+        root.lift()  # Posa la finestra emergent en primer pla
+        root.attributes('-topmost', True)  # La finestra sempre al davant
+
+        self.mainWindow.processor.local_path = filedialog.askdirectory()
+
+        if self.mainWindow.processor.local_path:
+            self.mainWindow.processor.local_path = self.mainWindow.processor.local_path.replace("/", "\\")
+        else:
+            print("Canceled")
+            return
+
+        # Start LinMot and reset buffer index counter
+        self.DO_task_PrepareRaspberry.set_line(1)
+
+        loop_counter = 0
+
+        while loop_counter < 10000:
+            status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
+            status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
+
+            if status_bit_0 == 0 and status_bit_1 == 0:
+                loop_counter += 1
+            elif status_bit_0 == 1 and status_bit_1 == 0:  # OK and no error
+                break
+            elif status_bit_0 == 0 and status_bit_1 == 1:  # NOT OK and error
+                self.DO_task_PrepareRaspberry.set_line(0)
+                self.raspberry.execute.emit(lambda: self.raspberry.reset_codesys())
+                print(
+                    "\033[91mError, impossible to prepare raspberry to record, check codesys invalid license error. "
+                    "Resetting Codesys, please wait... \033[0m")
+                return
+            else:
+                self.DO_task_PrepareRaspberry.set_line(0)
+                self.raspberry.execute.emit(lambda: self.raspberry.reset_codesys())
+                print("\033[91mError, EtherCAT bus is not working, resetting Codesys, please wait...\033[0m")
+                return
+
+        if loop_counter >= 10000:
+            self.DO_task_PrepareRaspberry.set_line(0)
+            print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
+            return
+
+        self.task.index = 0  # Reset buffer index
+        self.DO_task_LinMotTrigger.set_line(1)
+        self.toggle_linmot_signal.emit()
+
+
+    @pyqtSlot()
+    def stop_adquisition(self):
+
+        print("Stopping adquisition")
+
+        # Stop LinMot and save data
+        self.DO_task_LinMotTrigger.set_line(0)
+        self.DO_task_PrepareRaspberry.set_line(0)
+        if self.task.index != 0:
+            data = self.task.current_buffer[0:self.task.index]
+            self.task.processor_signal.emit(data)
+            self.task.index = 0
+
+        loop_counter = 0
+
+        while loop_counter < 10000:
+            status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
+            status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
+
+            if status_bit_0 == 0 and status_bit_1 == 0:
+                break
+            else:
+                loop_counter += 1
+
+        if loop_counter >= 10000:
+            print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
+            return
+
+        self.raspberry.execute.emit(lambda: self.raspberry.download_folder(self.remote_path, local_path=self.processor.local_path))
+        self.raspberry.execute.emit(lambda: self.raspberry.remove_files_with_extension(self.remote_path))
+
+        self.toggle_linmot_signal.emit()
+
+
+# ---------------- INTERFACE AND PLOT  ----------------
+class MainWindow(QWidget):
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("DAQ Viewer")
+        self.layout = QVBoxLayout(self)
+        self.moveLinMot = False
+
+        self.plot_buffer = np.zeros(PLOT_BUFFER_SIZE, dtype=float)
+
+        self.plot_widget = pg.PlotWidget()
+        self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
+
+        # Adquisition control button:
+        self.button = QPushButton("START LinMot")
+        self.button.clicked.connect(self.trigger_adquisition)
+        self.layout.addWidget(self.button)
+        self.layout.addWidget(self.plot_widget)
+
+        # Buffer processor (save to disk) (1 thread)
+        self.processor = BufferProcessor(SAMPLE_RATE, self)
+        self.thread_saver = QThread()
+        self.processor.moveToThread(self.thread_saver)
+        self.thread_saver.start()
+
+        # Raspberry Communicator + DAQ Analog Task (2 threads):
+        self.dev_comunicator = DeviceCommunicator(mainWindowReference=self)
+        self.dev_comunicator.toggle_linmot_signal.connect(self.toggle_linmot)
+        self.thread_communicator = QThread()
+        self.dev_comunicator.moveToThread(self.thread_communicator)
+        self.thread_communicator.start()
+
         # QTimer to update plot view
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_plot)
@@ -231,8 +343,8 @@ class MainWindow(QWidget):
 
         ### Display DAQ signal (using circular buffer method)
         display_data = np.concatenate((
-        self.plot_buffer[self.task.write_index:],
-        self.plot_buffer[:self.task.write_index]
+        self.plot_buffer[self.dev_comunicator.task.write_index:],
+        self.plot_buffer[:self.dev_comunicator.task.write_index]
         ))
         self.curve.setData(display_data)
 
@@ -251,109 +363,46 @@ class MainWindow(QWidget):
         #     print(f"Buffer display mean: {np.mean(buffer_display_array):.9f}")
 
     def closeEvent(self, event):
-        self.task.StopTask()
-        self.task.ClearTask()
 
-        self.DO_task_LinMotTrigger.set_line(0)
-        self.DO_task_LinMotTrigger.StopTask()
-        self.DO_task_LinMotTrigger.ClearTask()
+        self.dev_comunicator.task.StopTask()
+        self.dev_comunicator.task.ClearTask()
 
-        self.DO_task_PrepareRaspberry.set_line(0)
-        self.DO_task_PrepareRaspberry.StopTask()
-        self.DO_task_PrepareRaspberry.ClearTask()
+        self.dev_comunicator.DO_task_LinMotTrigger.set_line(0)
+        self.dev_comunicator.DO_task_LinMotTrigger.StopTask()
+        self.dev_comunicator.DO_task_LinMotTrigger.ClearTask()
 
-        self.DI_task_Raspberry_status_0.StopTask()
-        self.DI_task_Raspberry_status_0.ClearTask()
+        self.dev_comunicator.DO_task_PrepareRaspberry.set_line(0)
+        self.dev_comunicator.DO_task_PrepareRaspberry.StopTask()
+        self.dev_comunicator.DO_task_PrepareRaspberry.ClearTask()
 
-        self.DI_task_Raspberry_status_1.StopTask()
-        self.DI_task_Raspberry_status_1.ClearTask()
+        self.dev_comunicator.DI_task_Raspberry_status_0.StopTask()
+        self.dev_comunicator.DI_task_Raspberry_status_0.ClearTask()
 
-        self.thread.quit()
-        self.thread.wait()
+        self.dev_comunicator.DI_task_Raspberry_status_1.StopTask()
+        self.dev_comunicator.DI_task_Raspberry_status_1.ClearTask()
+
+        self.thread_saver.quit()
+        self.thread_saver.wait()
+
+        self.thread_communicator.quit()
+        self.thread_communicator.wait()
+
         event.accept()
 
+    @pyqtSlot()
     def toggle_linmot(self):
-        global moveLinMot
+        print("Running toggle_linmot")
+        self.moveLinmot = not self.moveLinMot
+        print(self.moveLinmot)
+        self.button.setText("STOP LinMot" if self.moveLinMot else "START LinMot")
 
-        if moveLinMot:
-            # Stop LinMot and save data
-            self.DO_task_LinMotTrigger.set_line(0)
-            self.DO_task_PrepareRaspberry.set_line(0)
-            if self.task.index != 0:
-                data = self.task.current_buffer[0:self.task.index]
-                self.task.processor_signal.emit(data)
-                self.task.index = 0
-
-            loop_counter = 0
-
-            while loop_counter < 10000:
-                status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
-                status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
-
-                if status_bit_0 == 0 and status_bit_1 == 0:
-                    break
-                else:
-                    loop_counter += 1
-
-            if loop_counter >= 10000:
-                print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
-                return
-
-            self.raspberry.execute.emit(lambda: self.raspberry.download_folder(self.remote_path, local_path=self.processor.local_path))
-            self.raspberry.execute.emit(lambda: self.raspberry.remove_files_with_extension(self.remote_path))
-
+    def trigger_adquisition(self):
+        if self.moveLinMot:
+            print("moveLinMot is True")
+            self.dev_comunicator.stop_adquisition_signal.emit()
         else:
-            # Get file save location from user:
-            print("Please provide a save location for incoming data.")
-            root = tk.Tk()
-            root.withdraw()  # Amaga la finestra princial de tkinter
-            root.lift()  # Posa la finestra emergent en primer pla
-            root.attributes('-topmost', True)  # La finestra sempre al davant
-
-            self.processor.local_path = filedialog.askdirectory()
-
-            if self.processor.local_path:
-                self.processor.local_path = self.processor.local_path.replace("/", "\\")
-            else:
-                print("Canceled")
-                return
-
-            # Start LinMot and reset buffer index counter
-            self.DO_task_PrepareRaspberry.set_line(1)
-
-            loop_counter = 0
-
-            while loop_counter < 10000:
-                status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
-                status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
-
-                if status_bit_0 == 0 and status_bit_1 == 0:
-                    loop_counter += 1
-                elif status_bit_0 == 1 and status_bit_1 == 0:  # OK and no error
-                    break
-                elif status_bit_0 == 0 and status_bit_1 == 1:  # NOT OK and error
-                    self.DO_task_PrepareRaspberry.set_line(0)
-                    self.raspberry.execute.emit(lambda: self.raspberry.reset_codesys())
-                    print(
-                        "\033[91mError, impossible to prepare raspberry to record, check codesys invalid license error. "
-                        "Resetting Codesys, please wait... \033[0m")
-                    return
-                else:
-                    self.DO_task_PrepareRaspberry.set_line(0)
-                    self.raspberry.execute.emit(lambda: self.raspberry.reset_codesys())
-                    print("\033[91mError, EtherCAT bus is not working, resetting Codesys, please wait...\033[0m")
-                    return
-
-            if loop_counter >= 10000:
-                self.DO_task_PrepareRaspberry.set_line(0)
-                print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
-                return
-
-            self.task.index = 0  # Reset buffer index
-            self.DO_task_LinMotTrigger.set_line(1)
-
-        moveLinMot = not moveLinMot
-        self.button.setText("STOP LinMot" if moveLinMot else "START LinMot")
+            print("moveLinMot is False")
+            self.dev_comunicator.start_adquisition_signal.emit()
 
 
 class DigitalOutputTask(Task):
