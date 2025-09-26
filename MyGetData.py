@@ -113,10 +113,14 @@ class DAQTask(Task):
 
 # ---------------- INTERFACE AND PLOT  ----------------
 class AdquisitionProgram(QWidget):
+    
+    thread_signal_manager = pyqtSignal(object)
+    
     def __init__(self, 
                  CHANNELS,
                  exp_dir=None, 
-                 tribu_id=None, 
+                 tribu_id=None,
+                 rload_id=None,
                  automatic_mode=False, 
                  measure_time=30, 
                  SAMPLE_RATE=10000,
@@ -173,6 +177,12 @@ class AdquisitionProgram(QWidget):
         self.plot_widget = pg.PlotWidget()
         self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
         
+        # Set rload_id if given:
+        if rload_id:
+            self.rload_id = rload_id
+        else:
+            self.rload_id = None
+        
         # Raspberry Pi SSH connection parameters
         self.rb_hostname = "192.168.100.200"
         self.rb_port = 22
@@ -181,9 +191,10 @@ class AdquisitionProgram(QWidget):
         self.rb_remote_path = "/var/opt/codesys/PlcLogic/FTP_Folder"
 
         self.raspberry = RaspberryInterface(hostname=self.rb_hostname, 
-                                            port=self.rb_port, 
+                                            port=self.rb_port,
                                             username=self.rb_username, 
-                                            password=self.rb_password)
+                                            password=self.rb_password, 
+                                            AdquisitionProgramReference=self)
         self.thread_raspberry = QThread()
         self.raspberry.moveToThread(self.thread_raspberry)
         self.thread_raspberry.start()
@@ -191,6 +202,7 @@ class AdquisitionProgram(QWidget):
 
         self.button = QPushButton("START LinMot")
         self.button.clicked.connect(self.toggle_linmot)
+        self.thread_signal_manager.connect(self.run_function)
         
         # Timer UI elements
         self.timer_label = QLabel("Duration (s):")
@@ -254,6 +266,11 @@ class AdquisitionProgram(QWidget):
         
         if self.automatic_mode:
             self.toggle_linmot()
+            
+            
+    @pyqtSlot(object)
+    def run_function(self, function):
+        function()
 
     def update_countdown(self):
         if self.remaining_seconds > 0 and self.moveLinMot[0]:
@@ -355,11 +372,12 @@ class AdquisitionProgram(QWidget):
 
         else:
             # START measurement
-            print("\nPlease enter RloadId")
-            self.rload_id, ok = QInputDialog.getText(self, "Input", "Enter RloadId:")
-            if not ok or not self.rload_id:
-                print("No RloadId entered. Operation canceled.")
-                return
+            if not self.rload_id:
+                print("\nPlease enter RloadId")
+                self.rload_id, ok = QInputDialog.getText(self, "Input", "Enter RloadId:")
+                if not ok or not self.rload_id:
+                    print("No RloadId entered. Operation canceled.")
+                    return
             
             self.date_now = datetime.now().strftime("%d%m%Y_%H%M%S")
             self.exp_id = f"{self.date_now}-{self.tribu_id}-{self.rload_id}"
@@ -509,6 +527,7 @@ if __name__ == '__main__':
         "Current": "Dev1/ai3"
     }
     app = QApplication(sys.argv)
+    # Afegir passar les R i els codis de la DAQ i fer el loop
     window = AdquisitionProgram(CHANNELS, automatic_mode=True)
     window.show()
     sys.exit(app.exec_())

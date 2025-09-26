@@ -13,7 +13,7 @@ class RaspberryInterface(QObject):
 
     execute = pyqtSignal(object)
 
-    def __init__(self, hostname, port, username, password, 
+    def __init__(self, hostname, port, username, password, AdquisitionProgramReference, 
                  codesys_folder="/var/opt/codesys/PlcLogic/FTP_Folder"):
 
         super().__init__()
@@ -24,6 +24,7 @@ class RaspberryInterface(QObject):
         self.codesys_folder = codesys_folder
         self.current_path = str(Path("__file__").resolve().parent)
         self.execute.connect(self.run_function)
+        self.AdquisitionProgram = AdquisitionProgramReference
         
         # Create SSH client
         self.ssh = paramiko.SSHClient()
@@ -75,6 +76,11 @@ class RaspberryInterface(QObject):
         self.stop_codesys()
         self.start_codesys()
         print("Codesys has been reset succesfully")
+        
+        # Codesys needs time to start the EtherCAT communication
+        time.sleep(5)
+        
+        self.AdquisitionProgram.thread_signal_manager.emit(lambda: self.AdquisitionProgram.toggle_linmot())
         
     def check_file_integrity(self, local_path, remote_path):
         

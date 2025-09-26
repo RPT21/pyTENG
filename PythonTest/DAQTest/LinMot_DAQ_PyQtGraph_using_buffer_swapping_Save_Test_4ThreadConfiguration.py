@@ -3,14 +3,13 @@ import numpy as np
 import pandas as pd
 import time
 import threading
-from PyQt5.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget, QFileDialog
 from PyQt5.QtCore import QObject, pyqtSignal, QThread, QTimer, pyqtSlot
 import pyqtgraph as pg
 from PyDAQmx import Task
 from PyDAQmx.DAQmxConstants import *
 from PyDAQmx.DAQmxFunctions import *
 import tkinter as tk
-from tkinter import filedialog
 import os
 from RaspberryInterface import RaspberryInterface
 
@@ -162,7 +161,6 @@ class DeviceCommunicator(QObject):
 
     start_adquisition_signal = pyqtSignal()
     stop_adquisition_signal = pyqtSignal()
-    toggle_linmot_signal = pyqtSignal()
 
     def __init__(self, mainWindowReference):
         super().__init__()
@@ -221,7 +219,8 @@ class DeviceCommunicator(QObject):
         root.lift()  # Posa la finestra emergent en primer pla
         root.attributes('-topmost', True)  # La finestra sempre al davant
 
-        self.mainWindow.processor.local_path = filedialog.askdirectory()
+        self.mainWindow.processor.local_path = QFileDialog.getExistingDirectory(self.mainWindow, 
+                                                                                "Select a Directory to save the data")
 
         if self.mainWindow.processor.local_path:
             self.mainWindow.processor.local_path = self.mainWindow.processor.local_path.replace("/", "\\")
@@ -262,7 +261,8 @@ class DeviceCommunicator(QObject):
 
         self.task.index = 0  # Reset buffer index
         self.DO_task_LinMotTrigger.set_line(1)
-        self.toggle_linmot_signal.emit()
+        self.mainWindow.moveLinMot = not self.mainWindow.moveLinMot
+        self.mainWindow.thread_signal_manager.emit(lambda: self.mainWindow.toggle_linmot())
 
 
     @pyqtSlot()
@@ -293,14 +293,17 @@ class DeviceCommunicator(QObject):
             print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
             return
 
-        self.raspberry.execute.emit(lambda: self.raspberry.download_folder(self.remote_path, local_path=self.processor.local_path))
+        self.raspberry.execute.emit(lambda: self.raspberry.download_folder(self.remote_path, local_path=self.mainWindow.processor.local_path))
         self.raspberry.execute.emit(lambda: self.raspberry.remove_files_with_extension(self.remote_path))
 
-        self.toggle_linmot_signal.emit()
+        self.mainWindow.moveLinMot = not self.mainWindow.moveLinMot
+        self.mainWindow.thread_signal_manager.emit(lambda: self.mainWindow.toggle_linmot())
 
 
 # ---------------- INTERFACE AND PLOT  ----------------
 class MainWindow(QWidget):
+    
+    thread_signal_manager = pyqtSignal(object)
 
     def __init__(self):
         super().__init__()
@@ -327,7 +330,7 @@ class MainWindow(QWidget):
 
         # Raspberry Communicator + DAQ Analog Task (2 threads):
         self.dev_comunicator = DeviceCommunicator(mainWindowReference=self)
-        self.dev_comunicator.toggle_linmot_signal.connect(self.toggle_linmot)
+        self.thread_signal_manager.connect(self.run_function)
         self.thread_communicator = QThread()
         self.dev_comunicator.moveToThread(self.thread_communicator)
         self.thread_communicator.start()
@@ -388,12 +391,15 @@ class MainWindow(QWidget):
         self.thread_communicator.wait()
 
         event.accept()
+        
+    @pyqtSlot(object)
+    def run_function(self, function):
+        function()
 
-    @pyqtSlot()
     def toggle_linmot(self):
-        print("Running toggle_linmot")
-        self.moveLinmot = not self.moveLinMot
-        print(self.moveLinmot)
+        # print("Running toggle_linmot")
+        # self.moveLinmot = not self.moveLinMot
+        # print(self.moveLinmot)
         self.button.setText("STOP LinMot" if self.moveLinMot else "START LinMot")
 
     def trigger_adquisition(self):
