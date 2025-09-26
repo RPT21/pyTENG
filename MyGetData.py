@@ -21,40 +21,21 @@ from RaspberryInterface import RaspberryInterface
 from MyMerger import Files_merge
 from pyqtgraph.parametertree import Parameter, ParameterTree
 
-# ---------------- CONFIG ----------------
-
-CHANNELS = {
-    "LinMot_Enable": "Dev1/ai0",
-    "LinMot_Up_Down": "Dev1/ai1",
-    "Voltage": "Dev1/ai2",
-    "Current": "Dev1/ai3"
-}
-
-SAMPLE_RATE = 10000
-SAMPLES_PER_CALLBACK = 100
-CALLBACKS_PER_BUFFER = 500
-BUFFER_SIZE = SAMPLES_PER_CALLBACK * CALLBACKS_PER_BUFFER
-
-TimeWindowLength = 3  # seconds
-PLOT_BUFFER_SIZE = ((SAMPLE_RATE * TimeWindowLength) // SAMPLES_PER_CALLBACK) * SAMPLES_PER_CALLBACK
-refresh_rate = 10
-
-moveLinMot = False
-
 # ---------------- BUFFER PROCESSING THREAD ----------------
 class BufferProcessor(QObject):
     process_buffer = pyqtSignal(object)
 
-    def __init__(self, fs, parent=None):
+    def __init__(self, fs, moveLinMot, parent=None):
         super().__init__(parent)
         self.fs = fs
         self.process_buffer.connect(self.save_data)
         self.timestamp = 0
         self.local_path = None
+        self.moveLinMot = moveLinMot
 
     @pyqtSlot(object)
     def save_data(self, data):
-        if moveLinMot:
+        if self.moveLinMot[0]:
             t = np.arange(data.shape[0]) / self.fs + self.timestamp
             self.timestamp = t[-1] + (t[1] - t[0])
             df = pd.DataFrame({
@@ -70,43 +51,56 @@ class BufferProcessor(QObject):
 
 # ---------------- DAQ TASK WITH CALLBACK ----------------
 class DAQTask(Task):
-    def __init__(self, plot_buffer, processor_signal, data_column_selector):
+    def __init__(self, plot_buffer,
+                 processor_signal,
+                 data_column_selector, 
+                 BUFFER_SIZE,
+                 CHANNELS,
+                 SAMPLE_RATE,
+                 SAMPLES_PER_CALLBACK):
+
         super().__init__()
+        
+        self.SAMPLE_RATE = SAMPLE_RATE
+        self.SAMPLES_PER_CALLBACK = SAMPLES_PER_CALLBACK
+        self.BUFFER_SIZE = BUFFER_SIZE
 
         self.plot_buffer = plot_buffer
         self.write_index = 0
         self.processor_signal = processor_signal
         self.data_column_selector = data_column_selector
 
-        self.buffer1 = np.empty((BUFFER_SIZE, 4))
-        self.buffer2 = np.empty((BUFFER_SIZE, 4))
+        self.buffer1 = np.empty((self.BUFFER_SIZE, 4))
+        self.buffer2 = np.empty((self.BUFFER_SIZE, 4))
         self.current_buffer = self.buffer1
         self.index = 0
+        
+        
         
         for channel in list(CHANNELS.values()):
             self.CreateAIVoltageChan(channel, "", DAQmx_Val_RSE, -10.0, 10.0, DAQmx_Val_Volts, None)
         
-        self.CfgSampClkTiming("", SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, SAMPLES_PER_CALLBACK)
-        self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, SAMPLES_PER_CALLBACK, 0)
+        self.CfgSampClkTiming("", self.SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, self.SAMPLES_PER_CALLBACK)
+        self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, self.SAMPLES_PER_CALLBACK, 0)
         self.StartTask()
 
     def EveryNCallback(self):
         try:
-            data = np.empty((SAMPLES_PER_CALLBACK, 4), dtype=np.float64)
+            data = np.empty((self.SAMPLES_PER_CALLBACK, 4), dtype=np.float64)
             read = c_int32()
-            self.ReadAnalogF64(SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, data.size, byref(read), None)
+            self.ReadAnalogF64(self.SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, data.size, byref(read), None)
             
             data[:, 0] = np.where(data[:, 0] < 2, 0, 1)
             data[:, 1] = np.where(data[:, 1] < 2, 0, 1)
             data[:, 3] /= 499e3 
             
-            self.plot_buffer[self.write_index:self.write_index + SAMPLES_PER_CALLBACK] = data[:, int(self.data_column_selector.value()[-1])]
-            self.write_index = (self.write_index + SAMPLES_PER_CALLBACK) % self.plot_buffer.size
+            self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = data[:, int(self.data_column_selector.value()[-1])]
+            self.write_index = (self.write_index + self.SAMPLES_PER_CALLBACK) % self.plot_buffer.size
             
-            self.current_buffer[self.index:self.index + SAMPLES_PER_CALLBACK, :] = data
-            self.index += SAMPLES_PER_CALLBACK
+            self.current_buffer[self.index:self.index + self.SAMPLES_PER_CALLBACK, :] = data
+            self.index += self.SAMPLES_PER_CALLBACK
             
-            if self.index >= BUFFER_SIZE:
+            if self.index >= self.BUFFER_SIZE:
                 full_buffer = self.current_buffer.copy()
                 self.current_buffer = self.buffer1 if self.current_buffer is self.buffer2 else self.buffer2
                 self.index = 0
@@ -118,40 +112,78 @@ class DAQTask(Task):
         return 0
 
 # ---------------- INTERFACE AND PLOT  ----------------
-class MainWindow(QWidget):
-    def __init__(self):
+class AdquisitionProgram(QWidget):
+    def __init__(self, 
+                 CHANNELS,
+                 exp_dir=None, 
+                 tribu_id=None, 
+                 automatic_mode=False, 
+                 measure_time=30, 
+                 SAMPLE_RATE=10000,
+                 SAMPLES_PER_CALLBACK=100,
+                 CALLBACKS_PER_BUFFER=500,
+                 TimeWindowLength=3,  # seconds
+                 refresh_rate=10):  # miliseconds
+
         super().__init__()
         self.setWindowTitle("DAQ Viewer")
         self.layout = QVBoxLayout(self)
         
+        # Define the moveLinmot bool: 
+        # We use a list because a bool is not referenced when passed as an argument
+        self.moveLinMot = [False]
+        
+        # ---------------- CONFIG ----------------
+
+        self.SAMPLE_RATE = SAMPLE_RATE
+        self.SAMPLES_PER_CALLBACK = SAMPLES_PER_CALLBACK
+        self.CALLBACKS_PER_BUFFER = CALLBACKS_PER_BUFFER
+        self.BUFFER_SIZE = SAMPLES_PER_CALLBACK * CALLBACKS_PER_BUFFER
+
+        self.TimeWindowLength = TimeWindowLength
+        self.PLOT_BUFFER_SIZE = ((SAMPLE_RATE * TimeWindowLength) // SAMPLES_PER_CALLBACK) * SAMPLES_PER_CALLBACK
+        self.refresh_rate = refresh_rate
+        self.CHANNELS = CHANNELS
+        
+        self.automatic_mode = automatic_mode
+        
         # Request experiments directory
-        print("Please select the experiment directory.")
-        self.exp_dir = QFileDialog.getExistingDirectory(self, "Select Experiment Directory")
-        if not self.exp_dir or not os.path.isdir(self.exp_dir):
-            print("No directory selected. Exiting.")
-            sys.exit(0)
-        self.exp_dir = os.path.normpath(self.exp_dir)
+        if exp_dir:
+            self.exp_dir = exp_dir
+        else:
+            print("Please select the experiment directory.")
+            self.exp_dir = QFileDialog.getExistingDirectory(self, "Select Experiment Directory")
+            if not self.exp_dir or not os.path.isdir(self.exp_dir):
+                print("No directory selected. Exiting.")
+                sys.exit(0)
+            self.exp_dir = os.path.normpath(self.exp_dir)
             
         # Request TribuId
-        print("Please enter TribuId.")
-        self.tribu_id, ok = QInputDialog.getText(self, "Input", "Enter TribuId:")
-        if not ok or not self.tribu_id:
-            print("No TribuId entered. Exiting.")
-            sys.exit(0)
+        if tribu_id:
+            self.tribu_id = tribu_id
+        else:
+            print("Please enter TribuId.")
+            self.tribu_id, ok = QInputDialog.getText(self, "Input", "Enter TribuId:")
+            if not ok or not self.tribu_id:
+                print("No TribuId entered. Exiting.")
+                sys.exit(0)
 
-        self.plot_buffer = np.zeros(PLOT_BUFFER_SIZE, dtype=float)
+        self.plot_buffer = np.zeros(self.PLOT_BUFFER_SIZE, dtype=float)
 
         self.plot_widget = pg.PlotWidget()
         self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
         
         # Raspberry Pi SSH connection parameters
-        hostname = "192.168.100.200"
-        port = 22
-        username = "TENG"
-        password = "raspberry"
-        self.remote_path = "/var/opt/codesys/PlcLogic/FTP_Folder"
+        self.rb_hostname = "192.168.100.200"
+        self.rb_port = 22
+        self.rb_username = "TENG"
+        self.rb_password = "raspberry"
+        self.rb_remote_path = "/var/opt/codesys/PlcLogic/FTP_Folder"
 
-        self.raspberry = RaspberryInterface(hostname=hostname, port=port, username=username, password=password)
+        self.raspberry = RaspberryInterface(hostname=self.rb_hostname, 
+                                            port=self.rb_port, 
+                                            username=self.rb_username, 
+                                            password=self.rb_password)
         self.thread_raspberry = QThread()
         self.raspberry.moveToThread(self.thread_raspberry)
         self.thread_raspberry.start()
@@ -164,12 +196,12 @@ class MainWindow(QWidget):
         self.timer_label = QLabel("Duration (s):")
         self.timer_spinbox = QSpinBox()
         self.timer_spinbox.setRange(1, 86400)  # 1 sec to 24 hours
-        self.timer_spinbox.setValue(30)  # Default value
+        self.timer_spinbox.setValue(measure_time)  # Default value
         self.countdown_display = QLabel("Remaining time: -")
         self.countdown_display.setAlignment(Qt.AlignRight)
-        duration = QHBoxLayout()
-        duration.addWidget(self.timer_label)
-        duration.addWidget(self.timer_spinbox)
+        self.duration = QHBoxLayout()
+        self.duration.addWidget(self.timer_label)
+        self.duration.addWidget(self.timer_spinbox)
         
         # Signal selector
         self.param_group = Parameter.create(name='Signal', type='list', value=CHANNELS['Voltage'], limits=CHANNELS)
@@ -179,7 +211,7 @@ class MainWindow(QWidget):
         
         self.layout.addWidget(self.button)
         self.layout.addWidget(self.plot_widget)
-        self.layout.addLayout(duration)
+        self.layout.addLayout(self.duration)
         self.layout.addWidget(self.countdown_display)
         
         # Timer setup
@@ -189,12 +221,15 @@ class MainWindow(QWidget):
         self.should_save_data = False
         
         # Buffer processor and thread
-        self.processor = BufferProcessor(SAMPLE_RATE)
+        self.processor = BufferProcessor(self.SAMPLE_RATE, self.moveLinMot)
         self.thread = QThread()
         self.processor.moveToThread(self.thread)
         self.thread.start()
 
-        self.task = DAQTask(self.plot_buffer, self.processor.process_buffer, self.param_group)
+        self.task = DAQTask(self.plot_buffer, self.processor.process_buffer, 
+                            self.param_group, self.BUFFER_SIZE, self.CHANNELS,
+                            SAMPLE_RATE=self.SAMPLE_RATE, 
+                            SAMPLES_PER_CALLBACK=self.SAMPLES_PER_CALLBACK)
         
         # Digital IO tasks
         self.DO_task_LinMotTrigger = DigitalOutputTask(line="Dev1/port0/line7")
@@ -215,10 +250,13 @@ class MainWindow(QWidget):
         # Plot update timer
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_plot)
-        self.timer.start(refresh_rate)
-    
+        self.timer.start(self.refresh_rate)
+        
+        if self.automatic_mode:
+            self.toggle_linmot()
+
     def update_countdown(self):
-        if self.remaining_seconds > 0 and moveLinMot:
+        if self.remaining_seconds > 0 and self.moveLinMot[0]:
             self.remaining_seconds -= 1
             self.countdown_display.setText(f"Remaining time: {self.remaining_seconds} s")
         else:
@@ -235,6 +273,9 @@ class MainWindow(QWidget):
         self.curve.setData(display_data)
     
     def closeEvent(self, event):
+        
+        print("\nClosing DAQ Viewer")
+        
         # Cleanup DAQ tasks
         self.task.StopTask()
         self.task.ClearTask()
@@ -263,16 +304,15 @@ class MainWindow(QWidget):
         self.thread_raspberry.quit()
         self.thread_raspberry.wait()
         
-        if moveLinMot and os.path.isdir(self.processor.local_path):
+        if self.moveLinMot[0] and os.path.isdir(self.processor.local_path):
             shutil.rmtree(self.processor.local_path)
             print(f"Temporary folder {self.processor.local_path} deleted on exit.")
         
         event.accept()
 
     def toggle_linmot(self):
-        global moveLinMot
         
-        if moveLinMot:
+        if self.moveLinMot[0]:
             # STOP measurement
             self.measurement_timer.stop()
             self.countdown_display.setText("Remaining time: -")
@@ -298,8 +338,8 @@ class MainWindow(QWidget):
                 print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
                 return
 
-            self.raspberry.execute.emit(lambda: self.raspberry.download_folder(self.remote_path, local_path=self.processor.local_path))
-            self.raspberry.execute.emit(lambda: self.raspberry.remove_files_with_extension(self.remote_path))
+            self.raspberry.execute.emit(lambda: self.raspberry.download_folder(self.rb_remote_path, local_path=self.processor.local_path))
+            self.raspberry.execute.emit(lambda: self.raspberry.remove_files_with_extension(self.rb_remote_path))
 
             time.sleep(1)
             if self.should_save_data:
@@ -309,6 +349,9 @@ class MainWindow(QWidget):
                 print("Experiment interrupted.")
             
             shutil.rmtree(self.processor.local_path)
+            
+            if self.automatic_mode:
+                self.close()
 
         else:
             # START measurement
@@ -364,8 +407,8 @@ class MainWindow(QWidget):
             self.task.index = 0
             self.DO_task_LinMotTrigger.set_line(1)
             
-        moveLinMot = not moveLinMot
-        self.button.setText("STOP LinMot" if moveLinMot else "START LinMot")
+        self.moveLinMot[0] = not self.moveLinMot[0]
+        self.button.setText("STOP LinMot" if self.moveLinMot[0] else "START LinMot")
         
     def add_experiment_row(self):
         """Add a new row to ExpsDescription.xlsx with the experiment data if it doesn't already exist."""
@@ -458,8 +501,15 @@ class DigitalInputTask(Task):
 
 # ---------------- MAIN ----------------
 if __name__ == '__main__':
+    
+    CHANNELS = {
+        "LinMot_Enable": "Dev1/ai0",
+        "LinMot_Up_Down": "Dev1/ai1",
+        "Voltage": "Dev1/ai2",
+        "Current": "Dev1/ai3"
+    }
     app = QApplication(sys.argv)
-    window = MainWindow()
+    window = AdquisitionProgram(CHANNELS, automatic_mode=True)
     window.show()
     sys.exit(app.exec_())
 
