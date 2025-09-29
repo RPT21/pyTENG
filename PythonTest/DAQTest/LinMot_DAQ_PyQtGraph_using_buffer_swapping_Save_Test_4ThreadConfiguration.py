@@ -162,8 +162,8 @@ class DeviceCommunicator(QObject):
     start_adquisition_signal = pyqtSignal()
     stop_adquisition_signal = pyqtSignal()
 
-    def __init__(self, mainWindowReference):
-        super().__init__()
+    def __init__(self, mainWindowReference, parent=None):
+        super().__init__(parent)
 
         self.mainWindow = mainWindowReference
 
@@ -214,14 +214,8 @@ class DeviceCommunicator(QObject):
 
         # Get file save location from user:
         print("Please provide a save location for incoming data.")
-        root = tk.Tk()
-        root.withdraw()  # Amaga la finestra princial de tkinter
-        root.lift()  # Posa la finestra emergent en primer pla
-        root.attributes('-topmost', True)  # La finestra sempre al davant
-
         self.mainWindow.processor.local_path = QFileDialog.getExistingDirectory(self.mainWindow, 
                                                                                 "Select a Directory to save the data")
-
         if self.mainWindow.processor.local_path:
             self.mainWindow.processor.local_path = self.mainWindow.processor.local_path.replace("/", "\\")
         else:
@@ -261,8 +255,8 @@ class DeviceCommunicator(QObject):
 
         self.task.index = 0  # Reset buffer index
         self.DO_task_LinMotTrigger.set_line(1)
-        self.mainWindow.moveLinMot = not self.mainWindow.moveLinMot
-        self.mainWindow.thread_signal_manager.emit(lambda: self.mainWindow.toggle_linmot())
+        self.mainWindow.moveLinMot = True
+        self.mainWindow.thread_signal_manager.emit(lambda: self.mainWindow.update_button())
 
 
     @pyqtSlot()
@@ -296,8 +290,8 @@ class DeviceCommunicator(QObject):
         self.raspberry.execute.emit(lambda: self.raspberry.download_folder(self.remote_path, local_path=self.mainWindow.processor.local_path))
         self.raspberry.execute.emit(lambda: self.raspberry.remove_files_with_extension(self.remote_path))
 
-        self.mainWindow.moveLinMot = not self.mainWindow.moveLinMot
-        self.mainWindow.thread_signal_manager.emit(lambda: self.mainWindow.toggle_linmot())
+        self.mainWindow.moveLinMot = False
+        self.mainWindow.thread_signal_manager.emit(lambda: self.mainWindow.update_button())
 
 
 # ---------------- INTERFACE AND PLOT  ----------------
@@ -396,10 +390,7 @@ class MainWindow(QWidget):
     def run_function(self, function):
         function()
 
-    def toggle_linmot(self):
-        # print("Running toggle_linmot")
-        # self.moveLinmot = not self.moveLinMot
-        # print(self.moveLinmot)
+    def update_button(self):
         self.button.setText("STOP LinMot" if self.moveLinMot else "START LinMot")
 
     def trigger_adquisition(self):

@@ -4,17 +4,14 @@ import os
 from pathlib import Path
 import stat
 import time
-import tkinter as tk
-from tkinter import filedialog
-from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
-
+from PyQt5.QtCore import QObject
+from PyQt5.QtWidgets import QFileDialog
 
 class RaspberryInterface(QObject):
 
-    execute = pyqtSignal(object)
-
-    def __init__(self, hostname, port, username, password, AdquisitionProgramReference, 
-                 codesys_folder="/var/opt/codesys/PlcLogic/FTP_Folder"):
+    def __init__(self, hostname, port, username, password,
+                 codesys_folder="/var/opt/codesys/PlcLogic/FTP_Folder",
+                 timeout=2):
 
         super().__init__()
         self.hostname = hostname
@@ -23,18 +20,13 @@ class RaspberryInterface(QObject):
         self.password = password
         self.codesys_folder = codesys_folder
         self.current_path = str(Path("__file__").resolve().parent)
-        self.execute.connect(self.run_function)
-        self.AdquisitionProgram = AdquisitionProgramReference
-        
+        self.timeout = timeout
+
         # Create SSH client
         self.ssh = paramiko.SSHClient()
         
         # Automatically add unknown hosts
         self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-    @pyqtSlot(object)
-    def run_function(self, function):
-        function()
 
     def shutdown(self):
         stdin, stdout, stderr = self.ssh.exec_command("sudo poweroff")
@@ -75,12 +67,11 @@ class RaspberryInterface(QObject):
     def reset_codesys(self):
         self.stop_codesys()
         self.start_codesys()
-        print("Codesys has been reset succesfully")
-        
+
         # Codesys needs time to start the EtherCAT communication
         time.sleep(5)
-        
-        self.AdquisitionProgram.thread_signal_manager.emit(lambda: self.AdquisitionProgram.toggle_linmot())
+
+        print("Codesys has been reset succesfully")
         
     def check_file_integrity(self, local_path, remote_path):
         
@@ -164,12 +155,7 @@ class RaspberryInterface(QObject):
         if local_path == None:
             # Get file save location from user:
             print("Please provide a save location for incoming data.")
-            root = tk.Tk()
-            root.withdraw()  # Amaga la finestra princial de tkinter
-            root.lift()   # Posa la finestra emergent en primer pla
-            root.attributes('-topmost', True)  # La finestra sempre al davant
-    
-            local_path = filedialog.askdirectory()
+            local_path = QFileDialog.getExistingDirectory(self, "Select Save Directory")
     
             if local_path:
                 local_path = local_path.replace("/", "\\")
@@ -283,7 +269,9 @@ class RaspberryInterface(QObject):
             self.ssh.connect(hostname=self.hostname,
                              port=self.port,
                              username=self.username,
-                             password=self.password)
+                             password=self.password,
+                             timeout=self.timeout)
+
             print("Connected Succesfully")
             
             # Iniciar sesión SFTP
@@ -295,6 +283,8 @@ class RaspberryInterface(QObject):
             print("Authentication failed.")
         except paramiko.SSHException as e:
             print(f"SSH error: {e}")
+        except TimeoutError as e:
+            print(f"\033[91mError, impossible to connect to Raspberry Pi: {e} \033[0m")
         except Exception as e:
             print(f"Other error: {e}")
     
