@@ -41,8 +41,8 @@ refresh_rate = 10
 class BufferProcessor(QObject):
     process_buffer = pyqtSignal(object)
 
-    def __init__(self, fs, mainWindowReference):
-        super().__init__()
+    def __init__(self, fs, mainWindowReference, parent=None):
+        super().__init__(parent)
         self.fs = fs
         self.process_buffer.connect(self.save_data)
         self.timestamp = 0

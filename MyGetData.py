@@ -25,13 +25,13 @@ from pyqtgraph.parametertree import Parameter, ParameterTree
 class BufferProcessor(QObject):
     process_buffer = pyqtSignal(object)
 
-    def __init__(self, fs, moveLinMot, parent=None):
+    def __init__(self, fs, mainWindowReference, parent=None):
         super().__init__(parent)
         self.fs = fs
         self.process_buffer.connect(self.save_data)
         self.timestamp = 0
         self.local_path = None
-        self.moveLinMot = moveLinMot
+        self.mainWindow = mainWindowReference
 
     @pyqtSlot(object)
     def save_data(self, data):
