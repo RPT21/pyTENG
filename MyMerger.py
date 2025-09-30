@@ -6,6 +6,7 @@ def sort_function(string):
 
 
 def CSV_merge(folder_path, exp_id):
+    """This function merges the CSV files found in folder_path and saves the merged file in the parent directory."""
     files = [f for f in os.listdir(folder_path) if f.endswith('.csv')]
 
     if not files:
@@ -39,6 +40,7 @@ def CSV_merge(folder_path, exp_id):
 
 
 def Pickle_merge(folder_path, exp_id):
+    """This function merges the Pickle files found in folder_path and saves the merged file in the parent directory."""
     files = [f for f in os.listdir(folder_path) if f.endswith('.pkl')]
 
     if not files:
@@ -69,12 +71,6 @@ def Pickle_merge(folder_path, exp_id):
     
     return filename
 
-
-def Files_merge(folder_path, exp_id):
-    motor_file = CSV_merge(folder_path, exp_id)
-    daq_file = Pickle_merge(folder_path, exp_id)
-    
-    return motor_file, daq_file
 
 
         

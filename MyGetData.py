@@ -18,7 +18,7 @@ from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts,
 from PyQt5.QtCore import Qt, QObject, pyqtSignal, QThread, QTimer, pyqtSlot
 from PyDAQmx import Task
 from RaspberryInterface import RaspberryInterface
-from MyMerger import Files_merge
+from MyMerger import Pickle_merge, CSV_merge
 from pyqtgraph.parametertree import Parameter, ParameterTree
 
 # ---------------- BUFFER PROCESSING THREAD ----------------
@@ -419,15 +419,24 @@ class AdquisitionProgram(QWidget):
 
     @pyqtSlot()
     def stop_adquisition_success(self):
-        if self.dev_comunicator.is_rb_connected:
-            if self.should_save_data:
-                self.motor_file, self.daq_file = Files_merge(folder_path=self.processor.local_path, exp_id=self.exp_id)
-                self.add_experiment_row()
+        if self.should_save_data:
+            
+            self.daq_file = Pickle_merge(folder_path=self.processor.local_path, exp_id=self.exp_id)
+            
+            if self.dev_comunicator.is_rb_connected:
+                self.motor_file = CSV_merge(folder_path=self.processor.local_path, exp_id=self.exp_id)
             else:
-                print("Experiment interrupted.")
+                self.motor_file = ""
 
+            self.add_experiment_row()
+            
             # Delete files after merge
             shutil.rmtree(self.processor.local_path)
+            
+            print("Experiment ended succesfully!")
+
+        else:
+            print("Experiment interrupted.")
 
         self.update_button()
 
