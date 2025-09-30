@@ -32,22 +32,24 @@ class BufferProcessor(QObject):
         self.timestamp = 0
         self.local_path = None
         self.mainWindow = mainWindowReference
+        self.isSaving = False
 
     @pyqtSlot(object)
     def save_data(self, data):
-        if self.mainWindow.moveLinMot[0]:
-            t = np.arange(data.shape[0]) / self.fs + self.timestamp
-            self.timestamp = t[-1] + (t[1] - t[0])
-            df = pd.DataFrame({
-                "Time (s)": t,
-                "Voltage": data[:, 2],
-                "Current": data[:, 3],
-                "LINMOT_ENABLE": data[:, 0],
-                "LINMOT_UP_DOWN": data[:, 1]
-            })
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            df.to_pickle(f"{self.local_path}/DAQ_{timestamp}.pkl")
-            print(f"[+] Saved {len(data)} samples")
+        self.isSaving = True
+        t = np.arange(data.shape[0]) / self.fs + self.timestamp
+        self.timestamp = t[-1] + (t[1] - t[0])
+        df = pd.DataFrame({
+            "Time (s)": t,
+            "Voltage": data[:, 2],
+            "Current": data[:, 3],
+            "LINMOT_ENABLE": data[:, 0],
+            "LINMOT_UP_DOWN": data[:, 1]
+        })
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        df.to_pickle(f"{self.local_path}/DAQ_{timestamp}.pkl")
+        self.isSaving = False
+        print(f"[+] Saved {len(data)} samples")
 
 # ---------------- DAQ TASK WITH CALLBACK ----------------
 class DAQTask(Task):
@@ -58,7 +60,8 @@ class DAQTask(Task):
                  BUFFER_SIZE,
                  CHANNELS,
                  SAMPLE_RATE,
-                 SAMPLES_PER_CALLBACK):
+                 SAMPLES_PER_CALLBACK,
+                 AdquisitionProgramReference):
 
         super().__init__()
         
@@ -75,6 +78,7 @@ class DAQTask(Task):
         self.buffer2 = np.empty((self.BUFFER_SIZE, 4))
         self.current_buffer = self.buffer1
         self.index = 0
+        self.mainWindow = AdquisitionProgramReference
 
         for channel in list(CHANNELS.values()):
             self.CreateAIVoltageChan(channel, "", DAQmx_Val_RSE, -10.0, 10.0, DAQmx_Val_Volts, None)
@@ -89,21 +93,21 @@ class DAQTask(Task):
             read = c_int32()
             self.ReadAnalogF64(self.SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, data.size, byref(read), None)
             
-            data[:, 0] = np.where(data[:, 0] < 2, 0, 1)
-            data[:, 1] = np.where(data[:, 1] < 2, 0, 1)
-            data[:, 3] /= 499e3 
-            
             self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = data[:, int(self.data_column_selector.value()[-1])]
             self.write_index = (self.write_index + self.SAMPLES_PER_CALLBACK) % self.plot_buffer.size
-            
-            self.current_buffer[self.index:self.index + self.SAMPLES_PER_CALLBACK, :] = data
-            self.index += self.SAMPLES_PER_CALLBACK
-            
-            if self.index >= self.BUFFER_SIZE:
-                full_buffer = self.current_buffer
-                self.current_buffer = self.buffer1 if self.current_buffer is self.buffer2 else self.buffer2
-                self.index = 0
-                self.processor_signal.emit(full_buffer)
+
+            if self.mainWindow.moveLinMot[0]:
+                self.current_buffer[self.index:self.index + self.SAMPLES_PER_CALLBACK, :] = data
+                self.index += self.SAMPLES_PER_CALLBACK
+
+                if self.index >= self.BUFFER_SIZE:
+                    if not self.mainWindow.processor.isSaving:
+                        full_buffer = self.current_buffer
+                        self.current_buffer = self.buffer1 if self.current_buffer is self.buffer2 else self.buffer2
+                        self.index = 0
+                        self.processor_signal.emit(full_buffer)
+                    else:
+                        raise Exception("Fatal error thread race condition reached when saving into disk!")
         
         except Exception as e:
             print(f"DAQ error in callback: {e}")
@@ -132,7 +136,10 @@ class DeviceCommunicator(QObject):
                                             password=self.rb_password)
 
 
-        self.raspberry.connect()
+        self.is_rb_connected = self.raspberry.connect()
+
+        if not self.is_rb_connected:
+            print("The program will work without using Raspberry Pi.")
 
 
         self.start_adquisition_signal.connect(self.start_adquisition)
@@ -145,7 +152,8 @@ class DeviceCommunicator(QObject):
                             BUFFER_SIZE=self.mainWindow.BUFFER_SIZE,
                             CHANNELS=self.mainWindow.CHANNELS,
                             SAMPLE_RATE=self.mainWindow.SAMPLE_RATE,
-                            SAMPLES_PER_CALLBACK=self.mainWindow.SAMPLES_PER_CALLBACK)
+                            SAMPLES_PER_CALLBACK=self.mainWindow.SAMPLES_PER_CALLBACK,
+                            AdquisitionProgramReference=self.mainWindow)
 
         # DAQ Digital task relay control line 0
         self.DO_task_RelayLine0 = DigitalOutputTask(line="Dev1/port0/line5")
@@ -170,38 +178,39 @@ class DeviceCommunicator(QObject):
     @pyqtSlot()
     def start_adquisition(self, iteration=0):
 
-        if iteration >= 5:
-            print("\033[91mRaspberry Pi is not responding for 5 trials, stopping... \033[0m")
-            return
-
-        self.DO_task_PrepareRaspberry.set_line(1)
-
-        loop_counter = 0
-        while loop_counter < 10000:
-            status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
-            status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
-
-            if status_bit_0 == 0 and status_bit_1 == 0:
-                loop_counter += 1
-            elif status_bit_0 == 1 and status_bit_1 == 0:
-                break
-            elif status_bit_0 == 0 and status_bit_1 == 1:
-                self.DO_task_PrepareRaspberry.set_line(0)
-                print("\033[91mError, impossible to prepare raspberry to record, check codesys invalid license error. Resetting Codesys, please wait... \033[0m")
-                self.raspberry.reset_codesys()
-                self.start_adquisition(iteration = iteration + 1)
-                return
-            else:
-                self.DO_task_PrepareRaspberry.set_line(0)
-                print("\033[91mError, EtherCAT bus is not working, resetting Codesys, please wait...\033[0m")
-                self.raspberry.reset_codesys()
-                self.start_adquisition()
+        if self.is_rb_connected:
+            if iteration >= 5:
+                print("\033[91mRaspberry Pi is not responding for 5 trials, stopping... \033[0m")
                 return
 
-        if loop_counter >= 10000:
-            self.DO_task_PrepareRaspberry.set_line(0)
-            print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
-            return
+            self.DO_task_PrepareRaspberry.set_line(1)
+
+            loop_counter = 0
+            while loop_counter < 10000:
+                status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
+                status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
+
+                if status_bit_0 == 0 and status_bit_1 == 0:
+                    loop_counter += 1
+                elif status_bit_0 == 1 and status_bit_1 == 0:
+                    break
+                elif status_bit_0 == 0 and status_bit_1 == 1:
+                    self.DO_task_PrepareRaspberry.set_line(0)
+                    print("\033[91mError, impossible to prepare raspberry to record, check codesys invalid license error. Resetting Codesys, please wait... \033[0m")
+                    self.raspberry.reset_codesys()
+                    self.start_adquisition(iteration = iteration + 1)
+                    return
+                else:
+                    self.DO_task_PrepareRaspberry.set_line(0)
+                    print("\033[91mError, EtherCAT bus is not working, resetting Codesys, please wait...\033[0m")
+                    self.raspberry.reset_codesys()
+                    self.start_adquisition()
+                    return
+
+            if loop_counter >= 10000:
+                self.DO_task_PrepareRaspberry.set_line(0)
+                print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
+                return
 
         self.task.index = 0
         self.mainWindow.moveLinMot[0] = True
@@ -220,23 +229,27 @@ class DeviceCommunicator(QObject):
 
         if self.task.index != 0:
             data = self.task.current_buffer[:self.task.index]
-            self.task.processor_signal.emit(data)
+
+            # In this case this thread will do the saving
+            self.mainWindow.processor.save_data(data)
+
             self.task.index = 0
 
-        loop_counter = 0
-        while loop_counter < 10000:
-            status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
-            status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
-            if status_bit_0 == 0 and status_bit_1 == 0:
-                break
-            loop_counter += 1
+        if self.is_rb_connected:
+            loop_counter = 0
+            while loop_counter < 10000:
+                status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
+                status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
+                if status_bit_0 == 0 and status_bit_1 == 0:
+                    break
+                loop_counter += 1
 
-        if loop_counter >= 10000:
-            print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
-            return
+            if loop_counter >= 10000:
+                print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
+                return
 
-        self.raspberry.download_folder(self.rb_remote_path, local_path=self.mainWindow.processor.local_path)
-        self.raspberry.remove_files_with_extension(self.rb_remote_path)
+            self.raspberry.download_folder(self.rb_remote_path, local_path=self.mainWindow.processor.local_path)
+            self.raspberry.remove_files_with_extension(self.rb_remote_path)
 
         self.mainWindow.stop_adquisition_success_signal.emit()
 
@@ -402,16 +415,19 @@ class AdquisitionProgram(QWidget):
         self.should_save_data = False
 
         self.update_button()
+        print("The adquisition has started successfully!")
 
     @pyqtSlot()
     def stop_adquisition_success(self):
-        if self.should_save_data:
-            self.motor_file, self.daq_file = Files_merge(folder_path=self.processor.local_path, exp_id=self.exp_id)
-            self.add_experiment_row()
-        else:
-            print("Experiment interrupted.")
+        if self.dev_comunicator.is_rb_connected:
+            if self.should_save_data:
+                self.motor_file, self.daq_file = Files_merge(folder_path=self.processor.local_path, exp_id=self.exp_id)
+                self.add_experiment_row()
+            else:
+                print("Experiment interrupted.")
 
-        shutil.rmtree(self.processor.local_path)
+            # Delete files after merge
+            shutil.rmtree(self.processor.local_path)
 
         self.update_button()
 

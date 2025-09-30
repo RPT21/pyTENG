@@ -281,12 +281,18 @@ class RaspberryInterface(QObject):
     
         except paramiko.AuthenticationException:
             print("Authentication failed.")
+            return False
         except paramiko.SSHException as e:
             print(f"SSH error: {e}")
+            return False
         except TimeoutError as e:
             print(f"\033[91mError, impossible to connect to Raspberry Pi: {e} \033[0m")
+            return False
         except Exception as e:
             print(f"Other error: {e}")
+            return False
+
+        return True
     
     def disconnect(self):
         # Close the connection
