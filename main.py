@@ -102,10 +102,16 @@ class MainWindow(QWidget):
 
             # Preparem els diccionaris amb les mesures que volem fer i els seus paràmetres
             recording_parameters_dict = parameter_to_dict(self.RecordingParameters)
+
+            i = 0
             resistance_list = []
+
             for child in self.ResistancePanel.ResistanceSelection.children():
                 if child.value():  # Si hem seleccionat la resistència, l'afegim a la llista
                     resistance_list.append(parameter_to_dict(child))
+                    resistance_list[i]["RLOAD_ID"] = child.name()
+                    resistance_list[i]["DAQ_CODE"] = [int(bit) for bit in resistance_list[i]["DAQ_CODE"]]
+                    i += 1
 
             if len(resistance_list) != 0:
                 self.MeasurementCore.startMeasuring(Resistance_list=resistance_list,
