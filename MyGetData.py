@@ -11,7 +11,7 @@ from openpyxl import load_workbook
 from openpyxl.utils import column_index_from_string, get_column_letter
 from PyQt5.QtWidgets import (QApplication, QPushButton, QVBoxLayout, QWidget,
                              QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog)
-from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, 
+from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Diff,
                                     DAQmx_Val_Rising, DAQmx_Val_ContSamps, 
                                     DAQmx_Val_GroupByScanNumber, DAQmx_Val_Acquired_Into_Buffer, 
                                     DAQmx_Val_GroupByChannel, DAQmx_Val_ChanForAllLines)
@@ -81,7 +81,7 @@ class DAQTask(Task):
         self.mainWindow = AdquisitionProgramReference
 
         for channel in list(CHANNELS.values()):
-            self.CreateAIVoltageChan(channel, "", DAQmx_Val_RSE, -10.0, 10.0, DAQmx_Val_Volts, None)
+            self.CreateAIVoltageChan(channel[0], "", channel[1], -10.0, 10.0, DAQmx_Val_Volts, None)
         
         self.CfgSampClkTiming("", self.SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, self.SAMPLES_PER_CALLBACK)
         self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, self.SAMPLES_PER_CALLBACK, 0)
@@ -93,7 +93,7 @@ class DAQTask(Task):
             read = c_int32()
             self.ReadAnalogF64(self.SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, data.size, byref(read), None)
             
-            self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = data[:, int(self.data_column_selector.value()[-1])]
+            self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = data[:, self.data_column_selector.value()[-1]]
             self.write_index = (self.write_index + self.SAMPLES_PER_CALLBACK) % self.plot_buffer.size
 
             if self.mainWindow.moveLinMot[0]:
@@ -156,8 +156,8 @@ class DeviceCommunicator(QObject):
                             AdquisitionProgramReference=self.mainWindow)
 
         # DAQ Digital task relay control line 0
-        self.DO_task_RelayLine0 = DigitalOutputTask(line="Dev1/port0/line5")
-        self.DO_task_RelayLine0.StartTask()
+        self.DO_task_RelayCode = DigitalOutputTask_MultipleChannels()
+        self.DO_task_RelayCode.StartTask()
 
         # DAQ Digital Task LinMot
         self.DO_task_LinMotTrigger = DigitalOutputTask(line="Dev1/port0/line7")
@@ -214,7 +214,7 @@ class DeviceCommunicator(QObject):
 
         self.task.index = 0
         self.mainWindow.moveLinMot[0] = True
-        self.DO_task_RelayLine0.set_line(1)
+        self.DO_task_RelayCode.set_lines([0,0,0,0,0,1])
         self.DO_task_LinMotTrigger.set_line(1)
         self.mainWindow.start_adquisition_success_signal.emit()
 
@@ -225,7 +225,7 @@ class DeviceCommunicator(QObject):
 
         self.DO_task_LinMotTrigger.set_line(0)
         self.DO_task_PrepareRaspberry.set_line(0)
-        self.DO_task_RelayLine0.set_line(0)
+        self.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
 
         if self.task.index != 0:
             data = self.task.current_buffer[:self.task.index]
@@ -546,9 +546,9 @@ class AdquisitionProgram(QWidget):
         self.dev_comunicator.DO_task_LinMotTrigger.StopTask()
         self.dev_comunicator.DO_task_LinMotTrigger.ClearTask()
 
-        self.dev_comunicator.DO_task_RelayLine0.set_line(0)
-        self.dev_comunicator.DO_task_RelayLine0.StopTask()
-        self.dev_comunicator.DO_task_RelayLine0.ClearTask()
+        self.dev_comunicator.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
+        self.dev_comunicator.DO_task_RelayCode.StopTask()
+        self.dev_comunicator.DO_task_RelayCode.ClearTask()
 
         self.dev_comunicator.DO_task_PrepareRaspberry.set_line(0)
         self.dev_comunicator.DO_task_PrepareRaspberry.StopTask()
@@ -583,6 +583,16 @@ class DigitalOutputTask(Task):
         data = np.array([value], dtype=np.uint8)
         self.WriteDigitalLines(1, 1, 10.0, DAQmx_Val_GroupByChannel, data, None, None)
 
+class DigitalOutputTask_MultipleChannels(Task):
+    def __init__(self, channels="Dev1/port0/line0:5"):
+        Task.__init__(self)
+        self.CreateDOChan(channels, "", DAQmx_Val_ChanForAllLines)
+
+    def set_lines(self, values):
+        """values must be a list or an array of 8 values of type uint8 (0 or 1)"""
+        data = np.array(values, dtype=np.uint8)
+        self.WriteDigitalLines(1, 1, 10.0, DAQmx_Val_GroupByChannel, data, None, None)
+
 class DigitalInputTask(Task):
     def __init__(self, line):
         super().__init__()
@@ -596,13 +606,15 @@ class DigitalInputTask(Task):
 
 # ---------------- MAIN ----------------
 if __name__ == '__main__':
-    
+
+    # The order of definition is the order of saving into buffer so we need to put the order in the list
     CHANNELS = {
-        "LinMot_Enable": "Dev1/ai0",
-        "LinMot_Up_Down": "Dev1/ai1",
-        "Voltage": "Dev1/ai2",
-        "Current": "Dev1/ai3"
+        "LinMot_Enable": ["Dev1/ai0", DAQmx_Val_RSE, 0],
+        "LinMot_Up_Down": ["Dev1/ai1", DAQmx_Val_RSE, 1],
+        "Voltage": ["Dev1/ai2", DAQmx_Val_Diff, 2],
+        "Current": ["Dev1/ai3", DAQmx_Val_RSE, 3]
     }
+
     app = QApplication(sys.argv)
     # Afegir passar les R i els codis de la DAQ i fer el loop
     window = AdquisitionProgram(CHANNELS, automatic_mode=False)
