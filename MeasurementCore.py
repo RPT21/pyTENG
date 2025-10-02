@@ -68,6 +68,7 @@ class DAQTask(Task):
         self.SAMPLE_RATE = SAMPLE_RATE
         self.SAMPLES_PER_CALLBACK = SAMPLES_PER_CALLBACK
         self.BUFFER_SIZE = BUFFER_SIZE
+        self.CHANNELS = CHANNELS
 
         self.plot_buffer = PLOT_BUFFER
         self.write_index = 0
@@ -80,7 +81,7 @@ class DAQTask(Task):
         self.index = 0
         self.mainWindow = AdquisitionProgramReference
 
-        for channel in list(CHANNELS.values()):
+        for channel in list(self.CHANNELS.values()):
             self.CreateAIVoltageChan(channel[0], "", channel[1], -10.0, 10.0, DAQmx_Val_Volts, None)
         
         self.CfgSampClkTiming("", self.SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, self.SAMPLES_PER_CALLBACK)
@@ -89,7 +90,7 @@ class DAQTask(Task):
 
     def EveryNCallback(self):
         try:
-            data = np.empty((self.SAMPLES_PER_CALLBACK, len(CHANNELS)), dtype=np.float64)
+            data = np.empty((self.SAMPLES_PER_CALLBACK, len(self.CHANNELS)), dtype=np.float64)
             read = c_int32()
             self.ReadAnalogF64(self.SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, data.size, byref(read), None)
             
@@ -290,7 +291,9 @@ class AdquisitionProgram(QWidget):
                  CALLBACKS_PER_BUFFER=500,
                  TimeWindowLength=3,  # seconds
                  refresh_rate=10,
-                 parent=None):  # miliseconds
+                 parent=None,
+                 AcqButton=None,
+                 LoadButton=None):  # miliseconds
 
         super().__init__(parent)
         self.setWindowTitle("DAQ Viewer")
@@ -317,15 +320,19 @@ class AdquisitionProgram(QWidget):
         self.iterations = 0
         self.iteration_index = 0
         self.DAQ_CODE = DAQ_CODE
+        self.xClose = False
+        self.AcqButton = AcqButton
+        self.LoadButton = LoadButton
 
+        # Check RESISTANCE_DATA when automatic_mode enabled
         if self.automatic_mode:
             if self.RESISTANCE_DATA is None:
                 print("Automatic mode requires RESISTANCE_DATA to be set. Exiting.")
-                sys.exit(0)
+                self.xClose = True
+                return
 
             self.iterations = len(self.RESISTANCE_DATA) - 1
 
-        
         # Request experiments directory
         if exp_dir:
             self.exp_dir = exp_dir
@@ -334,9 +341,10 @@ class AdquisitionProgram(QWidget):
             self.exp_dir = QFileDialog.getExistingDirectory(self, "Select Experiment Directory")
             if not self.exp_dir or not os.path.isdir(self.exp_dir):
                 print("No directory selected. Exiting.")
-                sys.exit(0)
+                self.xClose = True
+                return
             self.exp_dir = os.path.normpath(self.exp_dir)
-            
+
         # Request TribuId
         if tribu_id:
             self.tribu_id = tribu_id
@@ -345,7 +353,8 @@ class AdquisitionProgram(QWidget):
             self.tribu_id, ok = QInputDialog.getText(self, "Input", "Enter TribuId:")
             if not ok or not self.tribu_id:
                 print("No TribuId entered. Exiting.")
-                sys.exit(0)
+                self.xClose = True
+                return
 
         self.plot_buffer = np.zeros(self.PLOT_BUFFER_SIZE, dtype=float)
 
@@ -585,39 +594,52 @@ class AdquisitionProgram(QWidget):
 
         print("\nClosing DAQ Viewer")
 
-        # Cleanup DAQ tasks
-        self.dev_comunicator.task.StopTask()
-        self.dev_comunicator.task.ClearTask()
+        if not self.xClose:
+            # Cleanup DAQ tasks
+            self.dev_comunicator.task.StopTask()
+            self.dev_comunicator.task.ClearTask()
 
-        self.dev_comunicator.DO_task_LinMotTrigger.set_line(0)
-        self.dev_comunicator.DO_task_LinMotTrigger.StopTask()
-        self.dev_comunicator.DO_task_LinMotTrigger.ClearTask()
+            self.dev_comunicator.DO_task_LinMotTrigger.set_line(0)
+            self.dev_comunicator.DO_task_LinMotTrigger.StopTask()
+            self.dev_comunicator.DO_task_LinMotTrigger.ClearTask()
 
-        self.dev_comunicator.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
-        self.dev_comunicator.DO_task_RelayCode.StopTask()
-        self.dev_comunicator.DO_task_RelayCode.ClearTask()
+            self.dev_comunicator.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
+            self.dev_comunicator.DO_task_RelayCode.StopTask()
+            self.dev_comunicator.DO_task_RelayCode.ClearTask()
 
-        self.dev_comunicator.DO_task_PrepareRaspberry.set_line(0)
-        self.dev_comunicator.DO_task_PrepareRaspberry.StopTask()
-        self.dev_comunicator.DO_task_PrepareRaspberry.ClearTask()
+            self.dev_comunicator.DO_task_PrepareRaspberry.set_line(0)
+            self.dev_comunicator.DO_task_PrepareRaspberry.StopTask()
+            self.dev_comunicator.DO_task_PrepareRaspberry.ClearTask()
 
-        self.dev_comunicator.DI_task_Raspberry_status_0.StopTask()
-        self.dev_comunicator.DI_task_Raspberry_status_0.ClearTask()
+            self.dev_comunicator.DI_task_Raspberry_status_0.StopTask()
+            self.dev_comunicator.DI_task_Raspberry_status_0.ClearTask()
 
-        self.dev_comunicator.DI_task_Raspberry_status_1.StopTask()
-        self.dev_comunicator.DI_task_Raspberry_status_1.ClearTask()
+            self.dev_comunicator.DI_task_Raspberry_status_1.StopTask()
+            self.dev_comunicator.DI_task_Raspberry_status_1.ClearTask()
 
-        self.thread_saver.quit()
-        self.thread_saver.wait()
+            self.thread_saver.quit()
+            self.thread_saver.wait()
 
-        self.thread_communicator.quit()
-        self.thread_communicator.wait()
+            self.thread_communicator.quit()
+            self.thread_communicator.wait()
 
-        if self.moveLinMot[0] and os.path.isdir(self.processor.local_path):
-            shutil.rmtree(self.processor.local_path)
-            print(f"Temporary folder {self.processor.local_path} deleted on exit.")
+            if self.moveLinMot[0] and os.path.isdir(self.processor.local_path):
+                shutil.rmtree(self.processor.local_path)
+                print(f"Temporary folder {self.processor.local_path} deleted on exit.")
+
+        if self.AcqButton:
+            self.AcqButton.setEnabled(True)
+
+        if self.LoadButton:
+            self.LoadButton.setEnabled(True)
 
         event.accept()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self.xClose:
+            # Close the QWidget as soon as it is created adding in the event loop a QTimer event
+            QTimer.singleShot(0, self.close)
 
 # ---------------- DIGITAL IO TASKS ----------------
 class DigitalOutputTask(Task):

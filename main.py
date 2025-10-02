@@ -14,7 +14,12 @@ from ReadExcel import read_excel
 from TreeStructures.ResistancePanel import ResistancePanel
 from TreeStructures.LinMotControl import LinMotControl
 from TreeStructures.RecordingParameters import RecordingParameters
-from MeasurementCore import MeasurementCore
+from MeasurementCore import AdquisitionProgram
+
+from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Diff,
+                                    DAQmx_Val_Rising, DAQmx_Val_ContSamps,
+                                    DAQmx_Val_GroupByScanNumber, DAQmx_Val_Acquired_Into_Buffer,
+                                    DAQmx_Val_GroupByChannel, DAQmx_Val_ChanForAllLines)
 
 
 # Function to convert a Parameter into a dict
@@ -87,44 +92,45 @@ class MainWindow(QWidget):
         # Afegim el GroupBox al layout de la GUI
         self.layout.addWidget(self.groupBox_ControlPanel)
 
-        # Definim la màquina d'estats per efectuar les mesures i la inicialitzem
-        self.MeasurementCore = MeasurementCore()
+        # The order of definition is the order of saving into buffer so we need to put the order in the list
+        self.CHANNELS = {
+            "LinMot_Enable": ["Dev1/ai0", DAQmx_Val_RSE, 0],
+            "LinMot_Up_Down": ["Dev1/ai1", DAQmx_Val_RSE, 1],
+            "Voltage": ["Dev1/ai2", DAQmx_Val_Diff, 2],
+            "Current": ["Dev1/ai3", DAQmx_Val_RSE, 3]
+        }
+
 
     def on_btnStart(self):
         # Example of accessing element
         # print(self.ResistancePanel.ResistanceSelection.child("Resistance 0").child("DAQ_CODE").value())
 
-        if not self.MeasurementCore.xRunning:
+        # Preparem els diccionaris amb les mesures que volem fer i els seus paràmetres
+        recording_parameters_dict = parameter_to_dict(self.RecordingParameters)
 
+        i = 0
+        resistance_list = []
+
+        for child in self.ResistancePanel.ResistanceSelection.children():
+            if child.value():  # Si hem seleccionat la resistència, l'afegim a la llista
+                resistance_list.append(parameter_to_dict(child))
+                resistance_list[i]["RLOAD_ID"] = child.name()
+                resistance_list[i]["DAQ_CODE"] = [int(bit) for bit in resistance_list[i]["DAQ_CODE"]]
+                i += 1
+
+        if len(resistance_list) != 0:
             # Avisem a l'usuari que comencen les mesures
             print("Starting Measurements")
-            self.btnAcq.setText('Stop Measure')
-
-            # Preparem els diccionaris amb les mesures que volem fer i els seus paràmetres
-            recording_parameters_dict = parameter_to_dict(self.RecordingParameters)
-
-            i = 0
-            resistance_list = []
-
-            for child in self.ResistancePanel.ResistanceSelection.children():
-                if child.value():  # Si hem seleccionat la resistència, l'afegim a la llista
-                    resistance_list.append(parameter_to_dict(child))
-                    resistance_list[i]["RLOAD_ID"] = child.name()
-                    resistance_list[i]["DAQ_CODE"] = [int(bit) for bit in resistance_list[i]["DAQ_CODE"]]
-                    i += 1
-
-            if len(resistance_list) != 0:
-                self.MeasurementCore.startMeasuring(Resistance_list=resistance_list,
-                                                   Recording_Configuration=recording_parameters_dict)
-            else:
-                print("Stopping Measurements, no resistance to measure")
-                self.btnAcq.setText('Start Measure')
-                self.MeasurementCore.stop()
-
+            self.btnAcq.setEnabled(False)
+            self.btnLoad.setEnabled(False)
+            self.AdquisitionProgram = AdquisitionProgram(CHANNELS=self.CHANNELS, RESISTANCE_DATA=resistance_list,
+                                                         AcqButton=self.btnAcq,
+                                                         LoadButton=self.btnLoad,
+                                                         automatic_mode=True)
+            self.AdquisitionProgram.show()
         else:
-            print("Stopping Measurements")
-            self.btnAcq.setText('Start Measure')
-            self.MeasurementCore.stop()
+            print("There are no resistances to measure")
+
 
     def on_loadParameters(self):
         options = QFileDialog.Options()
