@@ -633,6 +633,7 @@ class AdquisitionProgram(QWidget):
         if self.LoadButton:
             self.LoadButton.setEnabled(True)
 
+        # Use the accept() method of the class QCloseEvent to close the QWidget (if not desired use the ignore() method)
         event.accept()
 
     def showEvent(self, event):

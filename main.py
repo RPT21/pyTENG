@@ -100,6 +100,8 @@ class MainWindow(QWidget):
             "Current": ["Dev1/ai3", DAQmx_Val_RSE, 3]
         }
 
+        self.AdquisitionProgram = None
+
 
     def on_btnStart(self):
         # Example of accessing element
@@ -148,6 +150,13 @@ class MainWindow(QWidget):
         self.ResistancePanel = ResistancePanel(dictionary_parameters,
                                             name='Resistance Panel',
                                             title='Resistance Panel')
+
+    def closeEvent(self, event):
+        if self.AdquisitionProgram:
+            if self.AdquisitionProgram.isVisible():
+                self.AdquisitionProgram.close()
+
+        event.accept()
 
 
 def main():
