@@ -120,7 +120,15 @@ class DeviceCommunicator(QObject):
     start_adquisition_signal = pyqtSignal()
     stop_adquisition_signal = pyqtSignal()
 
-    def __init__(self, mainWindowReference, parent=None):
+    def __init__(self, mainWindowReference, parent=None,
+                 RelayCodeTask = None,
+                 LinMotTriggerTask = None,
+                 LinMotTriggerLine = "Dev1/port0/line7",
+                 PrepareRaspberryLine = "Dev1/port0/line6",
+                 RaspberryStatus_0_Line = "Dev1/port1/line0",
+                 RaspberryStatus_1_Line = "Dev1/port1/line1",
+                 RelayCodeLines = "Dev1/port0/line0:5"):
+
         super().__init__(parent)
 
         self.mainWindow = mainWindowReference
@@ -157,23 +165,29 @@ class DeviceCommunicator(QObject):
                             AdquisitionProgramReference=self.mainWindow)
 
         # DAQ Digital task relay control line 0
-        self.DO_task_RelayCode = DigitalOutputTask_MultipleChannels()
-        self.DO_task_RelayCode.StartTask()
+        if not RelayCodeTask:
+            self.DO_task_RelayCode = DigitalOutputTask_MultipleChannels(channels=RelayCodeLines)
+            self.DO_task_RelayCode.StartTask()
+        else:
+            self.DO_task_RelayCode = RelayCodeTask
 
         # DAQ Digital Task LinMot
-        self.DO_task_LinMotTrigger = DigitalOutputTask(line="Dev1/port0/line7")
-        self.DO_task_LinMotTrigger.StartTask()
+        if not LinMotTriggerTask:
+            self.DO_task_LinMotTrigger = DigitalOutputTask(line=LinMotTriggerLine)
+            self.DO_task_LinMotTrigger.StartTask()
+        else:
+            self.DO_task_LinMotTrigger = LinMotTriggerTask
 
         # DAQ Digital Task Prepare Raspberry
-        self.DO_task_PrepareRaspberry = DigitalOutputTask(line="Dev1/port0/line6")
+        self.DO_task_PrepareRaspberry = DigitalOutputTask(line=PrepareRaspberryLine)
         self.DO_task_PrepareRaspberry.StartTask()
 
         # Raspberry Read Task status bit 0
-        self.DI_task_Raspberry_status_0 = DigitalInputTask(line="Dev1/port1/line0")
+        self.DI_task_Raspberry_status_0 = DigitalInputTask(line=RaspberryStatus_0_Line)
         self.DI_task_Raspberry_status_0.StartTask()
 
         # Raspberry Read Task status bit 1
-        self.DI_task_Raspberry_status_1 = DigitalInputTask(line="Dev1/port1/line1")
+        self.DI_task_Raspberry_status_1 = DigitalInputTask(line=RaspberryStatus_1_Line)
         self.DI_task_Raspberry_status_1.StartTask()
 
     @pyqtSlot()
@@ -290,10 +304,17 @@ class AdquisitionProgram(QWidget):
                  SAMPLES_PER_CALLBACK=100,
                  CALLBACKS_PER_BUFFER=500,
                  TimeWindowLength=3,  # seconds
-                 refresh_rate=10,
+                 refresh_rate=10, # miliseconds
                  parent=None,
                  AcqButton=None,
-                 LoadButton=None):  # miliseconds
+                 LoadButton=None,
+                 RelayCodeTask=None,
+                 LinMotTriggerTask=None,
+                 LinMotTriggerLine="Dev1/port0/line7",
+                 PrepareRaspberryLine="Dev1/port0/line6",
+                 RaspberryStatus_0_Line="Dev1/port1/line0",
+                 RaspberryStatus_1_Line="Dev1/port1/line1",
+                 RelayCodeLines="Dev1/port0/line0:5"):
 
         super().__init__(parent)
         self.setWindowTitle("DAQ Viewer")
@@ -406,7 +427,15 @@ class AdquisitionProgram(QWidget):
         self.thread_saver.start()
 
         # Raspberry Communicator + DAQ Analog Task (2 threads):
-        self.dev_comunicator = DeviceCommunicator(mainWindowReference=self)
+        self.dev_comunicator = DeviceCommunicator(mainWindowReference=self,
+                                                  RelayCodeTask=RelayCodeTask,
+                                                  LinMotTriggerTask=LinMotTriggerTask,
+                                                  LinMotTriggerLine=LinMotTriggerLine,
+                                                  PrepareRaspberryLine=PrepareRaspberryLine,
+                                                  RaspberryStatus_0_Line=RaspberryStatus_0_Line,
+                                                  RaspberryStatus_1_Line=RaspberryStatus_1_Line,
+                                                  RelayCodeLines=RelayCodeLines)
+
         self.thread_communicator = QThread()
         self.dev_comunicator.moveToThread(self.thread_communicator)
         self.thread_communicator.start()
@@ -654,7 +683,7 @@ class DigitalOutputTask(Task):
         self.WriteDigitalLines(1, 1, 10.0, DAQmx_Val_GroupByChannel, data, None, None)
 
 class DigitalOutputTask_MultipleChannels(Task):
-    def __init__(self, channels="Dev1/port0/line0:5"):
+    def __init__(self, channels):
         Task.__init__(self)
         self.CreateDOChan(channels, "", DAQmx_Val_ChanForAllLines)
 
