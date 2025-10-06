@@ -34,23 +34,30 @@ class ResistanceSelection(pTypes.GroupParameter):
 
 class ManualTriggering(pTypes.GroupParameter):
     # Es equivalent a fer Parameter(type="group", ...)
-    def __init__(self, dictionary_parameters, **kwargs):
+    def __init__(self, dictionary_parameters, DO_task_RelayCode, **kwargs):
         super(ManualTriggering, self).__init__(**kwargs)
+
+        self.dictionary_parameters = dictionary_parameters
+
+        self.DICT_DAQ_CODES = {self.dictionary_parameters["NAME"][i] : [int(bit) for bit in code]
+                               for i, code in enumerate(self.dictionary_parameters['DAQ_CODE'])}
 
         dict_keys = list(dictionary_parameters.keys())
         rows = len(dictionary_parameters[dict_keys[0]])
-        columns = len(dict_keys)
 
         for n in range(rows):
             main_name = dictionary_parameters[dict_keys[0]][n]
-            children_parametres = list()
 
             self.addChild({'name': main_name,
                         'title': main_name,
                         'type': 'bool',
                         'expanded': True})
 
-        # Conectar eventos de cambio
+        self.initializing = True
+        self.selected_param = None
+        self.xchanged = False
+        self.DO_task_RelayCode = DO_task_RelayCode
+
         self.register_callbacks("Manual Triggering")
 
     def register_callbacks(self, block_name):
@@ -71,17 +78,32 @@ class ManualTriggering(pTypes.GroupParameter):
 
     def parameter_changed(self, param, value, block_name):
         """Función que se llama cuando un parámetro cambia."""
-        print(f"[{block_name}] '{param.name()}' changed to: {value}")
-        if value:
-            # Si uno se activa (se pone en True), desactivar los demás
-            for other_param in self.children():
-                if other_param is not param:
-                    other_param.setValue(False)
+        if not self.initializing:
+            if value and self.selected_param is not param:
+                if self.selected_param:
+                    self.xchanged = True
+                    self.selected_param.setValue(0)
+                self.selected_param = param
+                print(f"[{block_name}] '{param.name()}' selected")
+                DAQ_Code = self.DICT_DAQ_CODES[self.selected_param.name()]
+                self.DO_task_RelayCode.set_lines(DAQ_Code)
+                return
+
+            elif not value and self.selected_param is param and not self.xchanged:
+                self.selected_param = None
+                self.DO_task_RelayCode.set_lines([0, 0, 0, 0, 0, 0])
+                print(f"[{block_name}] '{param.name()}' disabled")
+
+            self.xchanged = False
+
+
+    def initialized_success(self):
+        self.initializing = False
 
 
 class ResistancePanel(pTypes.GroupParameter):
     # Es equivalent a fer Parameter(type="group", ...)
-    def __init__(self, dictionary_parameters = None, **kwargs):
+    def __init__(self, DO_task_RelayCode, dictionary_parameters = None, **kwargs):
 
         super(ResistancePanel, self).__init__(**kwargs)
 
@@ -99,16 +121,19 @@ class ResistancePanel(pTypes.GroupParameter):
                      '001100', '101100', '011100','111100']}
 
         if dictionary_parameters is None:
-            dictionary_parameters = self.default_dict
+            self.dictionary_parameters = self.default_dict
+        else:
+            self.dictionary_parameters = dictionary_parameters
 
         # Definim el ParameterGroup ResistanceSelection
-        self.ResistanceSelection = ResistanceSelection(dictionary_parameters,
+        self.ResistanceSelection = ResistanceSelection(self.dictionary_parameters,
                                                        name='Resistance Selection',
                                                        title='Resistance Selection')
         # Definim el ParameterGroup ManualTriggering
-        self.ManualTriggering = ManualTriggering(dictionary_parameters,
+        self.ManualTriggering = ManualTriggering(self.dictionary_parameters,
                                                  name='Manual Triggering',
-                                                 title='Manual Triggering')
+                                                 title='Manual Triggering',
+                                                 DO_task_RelayCode=DO_task_RelayCode)
 
         self.addChild(self.ResistanceSelection)
         self.addChild(self.ManualTriggering)

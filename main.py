@@ -14,13 +14,14 @@ from ReadExcel import read_excel
 from TreeStructures.ResistancePanel import ResistancePanel
 from TreeStructures.LinMotControl import LinMotControl
 from TreeStructures.RecordingParameters import RecordingParameters
-from MeasurementCore import AdquisitionProgram
+from MeasurementCore import AdquisitionProgram, DigitalOutputTask_MultipleChannels, DigitalOutputTask
 
 from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Diff,
                                     DAQmx_Val_Rising, DAQmx_Val_ContSamps,
                                     DAQmx_Val_GroupByScanNumber, DAQmx_Val_Acquired_Into_Buffer,
                                     DAQmx_Val_GroupByChannel, DAQmx_Val_ChanForAllLines)
 
+from PyQt5.QtCore import QTimer
 
 # Function to convert a Parameter into a dict
 def parameter_to_dict(param):
@@ -37,7 +38,7 @@ def parameter_to_dict(param):
 class MainWindow(QWidget):
     ''' Main Window '''
 
-    def __init__(self):
+    def __init__(self, RelayCodeLines="Dev1/port0/line0:5", LinMotTriggerLine="Dev1/port0/line7"):
         super(MainWindow, self).__init__()
         self.layout = QVBoxLayout(self)
 
@@ -62,15 +63,24 @@ class MainWindow(QWidget):
         self.blockLayout_ControlPanel = QVBoxLayout()
         self.groupBox_ControlPanel.setLayout(self.blockLayout_ControlPanel)
 
+
+        # Connect to DAQ:
+        self.RelayCodeLines = RelayCodeLines
+        self.LinMotTriggerLine = LinMotTriggerLine
+        self.DO_task_RelayCode = DigitalOutputTask_MultipleChannels(channels=self.RelayCodeLines)
+        self.DO_task_LinMotTrigger = DigitalOutputTask(line=self.LinMotTriggerLine)
+
         # Definim el ParameterTree
         self.ParameterTree_ControlPanel = ParameterTree()
 
         # Definim el ParameterGroup ResistancePanel
-        self.ResistancePanel = ResistancePanel(name='Resistance Panel',
+        self.ResistancePanel = ResistancePanel(DO_task_RelayCode=self.DO_task_RelayCode,
+                                               name='Resistance Panel',
                                                title='Resistance Panel')
 
         # Definim el ParameterGroup LinMotControl
-        self.LinMotControl = LinMotControl(name='LinMot Control',
+        self.LinMotControl = LinMotControl(DO_task_LinMotTrigger=self.DO_task_LinMotTrigger,
+                                           name='LinMot Control',
                                            title='LinMot Control')
 
         # Definim el ParameterGroup RecordingParameters
@@ -157,6 +167,11 @@ class MainWindow(QWidget):
                 self.AdquisitionProgram.close()
 
         event.accept()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, self.ResistancePanel.ManualTriggering.initialized_success)
+        QTimer.singleShot(0, self.LinMotControl.initialized_success)
 
 
 def main():

@@ -688,7 +688,7 @@ class DigitalOutputTask_MultipleChannels(Task):
         self.CreateDOChan(channels, "", DAQmx_Val_ChanForAllLines)
 
     def set_lines(self, values):
-        """values must be a list or an array of 8 values of type uint8 (0 or 1)"""
+        """values must be a list or an array of N values of type uint8 (0 or 1)"""
         data = np.array(values, dtype=np.uint8)
         self.WriteDigitalLines(1, 1, 10.0, DAQmx_Val_GroupByChannel, data, None, None)
 
