@@ -138,11 +138,8 @@ class MainWindow(QWidget):
         self.move(window_rect.topLeft())
 
     def on_btnStart(self):
-        # Example of accessing element
+        ### Example of accessing element ###
         # print(self.ResistancePanel.ResistanceSelection.child("Resistance 0").child("DAQ_CODE").value())
-
-        # Preparem els diccionaris amb les mesures que volem fer i els seus paràmetres
-        recording_parameters_dict = parameter_to_dict(self.RecordingParameters)
 
         i = 0
         resistance_list = []
