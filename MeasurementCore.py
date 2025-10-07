@@ -21,6 +21,14 @@ from RaspberryInterface import RaspberryInterface
 from MyMerger import Pickle_merge, CSV_merge
 from pyqtgraph.parametertree import Parameter, ParameterTree
 
+def set_group_readonly(group, readonly=True):
+    group.setReadonly(readonly)
+    for child in group.children():
+        if child.hasChildren():
+            set_group_readonly(child, readonly)
+        else:
+            child.setReadonly(readonly)
+
 # ---------------- BUFFER PROCESSING THREAD ----------------
 class BufferProcessor(QObject):
     process_buffer = pyqtSignal(object)
@@ -304,10 +312,10 @@ class AdquisitionProgram(QWidget):
                  SAMPLES_PER_CALLBACK=100,
                  CALLBACKS_PER_BUFFER=500,
                  TimeWindowLength=3,  # seconds
-                 refresh_rate=10, # miliseconds
+                 refresh_rate=10, # milliseconds
                  parent=None,
-                 AcqButton=None,
-                 LoadButton=None,
+                 mainWindowButtons=None,
+                 mainWindowParamGroups=None,
                  RelayCodeTask=None,
                  LinMotTriggerTask=None,
                  LinMotTriggerLine="Dev1/port0/line7",
@@ -323,6 +331,8 @@ class AdquisitionProgram(QWidget):
         # Define the moveLinmot bool: 
         # We use a list because a bool is not referenced when passed as an argument
         self.moveLinMot = [False]
+        self.LinMotTriggerTask = LinMotTriggerTask
+        self.RelayCodeTask = RelayCodeTask
         
         # ---------------- CONFIG ----------------
 
@@ -342,8 +352,8 @@ class AdquisitionProgram(QWidget):
         self.iteration_index = 0
         self.DAQ_CODE = DAQ_CODE
         self.xClose = False
-        self.AcqButton = AcqButton
-        self.LoadButton = LoadButton
+        self.mainWindowButtons = mainWindowButtons
+        self.mainWindowParamGroups = mainWindowParamGroups
 
         # Check RESISTANCE_DATA when automatic_mode enabled
         if self.automatic_mode:
@@ -629,12 +639,14 @@ class AdquisitionProgram(QWidget):
             self.dev_comunicator.task.ClearTask()
 
             self.dev_comunicator.DO_task_LinMotTrigger.set_line(0)
-            self.dev_comunicator.DO_task_LinMotTrigger.StopTask()
-            self.dev_comunicator.DO_task_LinMotTrigger.ClearTask()
+            if not self.LinMotTriggerTask:
+                self.dev_comunicator.DO_task_LinMotTrigger.StopTask()
+                self.dev_comunicator.DO_task_LinMotTrigger.ClearTask()
 
             self.dev_comunicator.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
-            self.dev_comunicator.DO_task_RelayCode.StopTask()
-            self.dev_comunicator.DO_task_RelayCode.ClearTask()
+            if not self.RelayCodeTask:
+                self.dev_comunicator.DO_task_RelayCode.StopTask()
+                self.dev_comunicator.DO_task_RelayCode.ClearTask()
 
             self.dev_comunicator.DO_task_PrepareRaspberry.set_line(0)
             self.dev_comunicator.DO_task_PrepareRaspberry.StopTask()
@@ -656,11 +668,14 @@ class AdquisitionProgram(QWidget):
                 shutil.rmtree(self.processor.local_path)
                 print(f"Temporary folder {self.processor.local_path} deleted on exit.")
 
-        if self.AcqButton:
-            self.AcqButton.setEnabled(True)
+        if self.mainWindowButtons:
+            for button in self.mainWindowButtons:
+                button.setEnabled(True)
 
-        if self.LoadButton:
-            self.LoadButton.setEnabled(True)
+        if self.mainWindowParamGroups:
+            for param_group in self.mainWindowParamGroups:
+                set_group_readonly(param_group, readonly=False)
+
 
         # Use the accept() method of the class QCloseEvent to close the QWidget (if not desired use the ignore() method)
         event.accept()

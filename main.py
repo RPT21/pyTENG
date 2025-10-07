@@ -1,7 +1,7 @@
 # Importing PyQt(5 or 6 version) from qtpy (compatibility abstraction layer for different PyQt versions)
 # PyQt5 is an adapted version of C/C++ Qt framework for python to do GUI applications
 from qtpy import QtWidgets
-from qtpy.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QFileDialog, QPushButton
+from qtpy.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QFileDialog, QPushButton, QDesktopWidget
 
 # Importing pyqtgraph (module of C/C++ Qt framework) to do ParameterTree widgets and plotting
 from pyqtgraph.parametertree import Parameter, ParameterTree
@@ -35,6 +35,15 @@ def parameter_to_dict(param):
     return result
 
 
+def set_group_readonly(group, readonly=True):
+    group.setReadonly(readonly)
+    for child in group.children():
+        if child.hasChildren():
+            set_group_readonly(child, readonly)
+        else:
+            child.setReadonly(readonly)
+
+
 class MainWindow(QWidget):
     ''' Main Window '''
 
@@ -42,7 +51,9 @@ class MainWindow(QWidget):
         super(MainWindow, self).__init__()
         self.layout = QVBoxLayout(self)
 
-        self.setGeometry(650, 20, 450, 1000)
+        self.resize(500, 1000)  # width x height
+        self.center()  # Call the center function
+
         self.setWindowTitle('TENG Control Software')
 
         # Add objects to main window
@@ -111,7 +122,20 @@ class MainWindow(QWidget):
         }
 
         self.AdquisitionProgram = None
+        self.mainWindowButtons = [self.btnAcq, self.btnLoad]
+        self.mainWindowParamGroups = [self.ResistancePanel, self.LinMotControl, self.RecordingParameters]
 
+    def center(self):
+        # Get the screen geometry
+        screen_rect = QDesktopWidget().availableGeometry()
+        screen_center = screen_rect.center()
+
+        # Calculate the position of the window in the screen based on the window geometry
+        window_rect = self.frameGeometry()
+        window_rect.moveCenter(screen_center)
+
+        # Mover the window to this position
+        self.move(window_rect.topLeft())
 
     def on_btnStart(self):
         # Example of accessing element
@@ -133,12 +157,38 @@ class MainWindow(QWidget):
         if len(resistance_list) != 0:
             # Avisem a l'usuari que comencen les mesures
             print("Starting Measurements")
-            self.btnAcq.setEnabled(False)
-            self.btnLoad.setEnabled(False)
+
+            # Setting to default the Manual Triggering and the LinMot Trigger
+            self.LinMotControl.LinMotTrigger_Parameter.setValue(False)
+            for param in self.ResistancePanel.ManualTriggering.children():
+                param.setValue(False)
+
+            # Disable buttons
+            for button in self.mainWindowButtons:
+                button.setEnabled(False)
+
+            # Disable the experiment configuration interface
+            for parameterGroup in self.mainWindowParamGroups:
+                set_group_readonly(parameterGroup, True)
+
             self.AdquisitionProgram = AdquisitionProgram(CHANNELS=self.CHANNELS, RESISTANCE_DATA=resistance_list,
-                                                         AcqButton=self.btnAcq,
-                                                         LoadButton=self.btnLoad,
-                                                         automatic_mode=True)
+                                                         mainWindowButtons=self.mainWindowButtons,
+                                                         mainWindowParamGroups=self.mainWindowParamGroups,
+                                                         automatic_mode=True,
+                                                         RelayCodeTask=self.DO_task_RelayCode,
+                                                         LinMotTriggerTask=self.DO_task_LinMotTrigger,
+                                                         measure_time=self.RecordingParameters.MeasuringTimeParameter.value(),
+                                                         SAMPLE_RATE=self.RecordingParameters.SamplingRateParameter.value(),
+                                                         SAMPLES_PER_CALLBACK=self.RecordingParameters.SAMPLES_PER_CALLBACK_Parameter.value(),
+                                                         CALLBACKS_PER_BUFFER=self.RecordingParameters.CALLBACKS_PER_BUFFER_Parameter.value(),
+                                                         TimeWindowLength=self.RecordingParameters.TimeWindowLenghtParameter.value(),
+                                                         refresh_rate=self.RecordingParameters.RefreshRateParameter.value(),
+                                                         LinMotTriggerLine=self.RecordingParameters.LinMotTriggerLineParameter.value(),
+                                                         PrepareRaspberryLine=self.RecordingParameters.PrepareRaspberryLineParameter.value(),
+                                                         RaspberryStatus_0_Line=self.RecordingParameters.RaspberryStatus_0_LineParameter.value(),
+                                                         RaspberryStatus_1_Line=self.RecordingParameters.RaspberryStatus_1_LineParameter.value(),
+                                                         RelayCodeLines=self.RecordingParameters.RelayCodeLinesParameter.value()
+                                                         )
             self.AdquisitionProgram.show()
         else:
             print("There are no resistances to measure")
@@ -165,6 +215,12 @@ class MainWindow(QWidget):
         if self.AdquisitionProgram:
             if self.AdquisitionProgram.isVisible():
                 self.AdquisitionProgram.close()
+
+        self.DO_task_LinMotTrigger.StopTask()
+        self.DO_task_LinMotTrigger.ClearTask()
+
+        self.DO_task_RelayCode.StopTask()
+        self.DO_task_RelayCode.ClearTask()
 
         event.accept()
 
