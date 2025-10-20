@@ -442,12 +442,14 @@ class AdquisitionProgram(QWidget):
         # Buffer processor and thread for each DAQ Task
         self.buffer_processors = []
         self.thread_savers = []
+        self.device_names = []
         for n, device in enumerate(self.CHANNELS):
             self.buffer_processors.append(BufferProcessor(fs=self.SAMPLE_RATE,
                                                           mainWindowReference=self,
                                                           channel_config=device["DAQ_CHANNELS"],
                                                           task_name=device["NAME"]))
             self.thread_savers.append(QThread())
+            self.device_names.append(device["NAME"])
             self.buffer_processors[n].moveToThread(self.thread_savers[n])
             self.thread_savers[n].start()
 
@@ -559,7 +561,7 @@ class AdquisitionProgram(QWidget):
     def stop_adquisition_success(self):
         if self.should_save_data:
             
-            self.daq_file = Pickle_merge(folder_path=self.local_path[0], exp_id=self.exp_id, groupby=["Dev1", "Dev2"])
+            self.daq_file = Pickle_merge(folder_path=self.local_path[0], exp_id=self.exp_id, groupby=self.device_names)
             
             if self.dev_comunicator.is_rb_connected:
                 self.motor_file = CSV_merge(folder_path=self.local_path[0], exp_id=self.exp_id)
@@ -591,17 +593,20 @@ class AdquisitionProgram(QWidget):
     @pyqtSlot()
     def trigger_adquisition(self):
 
-        if self.stop_for_error:
-            # STOP ADQUISITION
-            self.measurement_timer.stop()
-            self.countdown_display.setText("Remaining time: -")
-            self.dev_comunicator.stop_adquisition_signal.emit()
-            print("Stopped adquisition due to an error.")
-            return
-
         if self.sender() == self.button and self.automatic_mode:
             print("Automatic mode has been disabled, stopping adquisition.")
             self.automatic_mode = False
+
+        if self.stop_for_error:
+            if self.sender() == self.button:
+                self.stop_for_error = False
+            else:
+                # STOP ADQUISITION
+                self.measurement_timer.stop()
+                self.countdown_display.setText("Remaining time: -")
+                self.dev_comunicator.stop_adquisition_signal.emit()
+                print("Stopped adquisition due to an error.")
+                return
 
         if self.automatic_mode:
             print(f"Starting the iteration {self.iteration_index} of {self.iterations}")
