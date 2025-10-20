@@ -33,15 +33,16 @@ def set_group_readonly(group, readonly=True):
 class BufferProcessor(QObject):
     process_buffer_signal = pyqtSignal(object)
 
-    def __init__(self, fs, mainWindowReference, channel_config, parent=None):
+    def __init__(self, fs, mainWindowReference, channel_config, task_name, parent=None):
         super().__init__(parent)
         self.fs = fs
         self.process_buffer_signal.connect(self.save_data)
         self.timestamp = 0
-        self.local_path = None
         self.mainWindow = mainWindowReference
+        self.local_path = self.mainWindow.local_path
         self.isSaving = False
         self.channel_config = channel_config
+        self.task_name = task_name
 
     @pyqtSlot(object)
     def save_data(self, data):
@@ -51,18 +52,18 @@ class BufferProcessor(QObject):
 
         df = pd.DataFrame({"Time (s)": t})
         for channel_name in self.channel_config.keys():
-            df[channel_name] = data[self.channel_config[channel_name][-1]]
+            df[channel_name] = data[:, self.channel_config[channel_name][-1]]
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        df.to_pickle(f"{self.local_path}/DAQ_{timestamp}.pkl")
+        df.to_pickle(f"{self.local_path[0]}/DAQ_{self.task_name}_{timestamp}.pkl")
         self.isSaving = False
-        print(f"[+] Saved {len(data)} samples")
+        print(f"{self.task_name} -> [+] Saved {len(data)} samples")
 
 # ---------------- DAQ TASK WITH CALLBACK ----------------
 class DAQTask(Task):
     def __init__(self,
                  PLOT_BUFFER,
-                 BUFFER_PROCESSOR_SIGNAL,
+                 BUFFER_PROCESSOR,
                  SIGNAL_SELECTOR,
                  BUFFER_SIZE,
                  CHANNELS,
@@ -81,7 +82,8 @@ class DAQTask(Task):
 
         self.plot_buffer = PLOT_BUFFER
         self.write_index = 0
-        self.processor_signal = BUFFER_PROCESSOR_SIGNAL
+        self.BUFFER_PROCESSOR = BUFFER_PROCESSOR
+        self.processor_signal = BUFFER_PROCESSOR.process_buffer_signal
         self.data_column_selector = SIGNAL_SELECTOR
 
         self.buffer1 = np.empty((self.BUFFER_SIZE, self.number_channels))
@@ -115,12 +117,15 @@ class DAQTask(Task):
                 self.index += self.SAMPLES_PER_CALLBACK
 
                 if self.index >= self.BUFFER_SIZE:
-                    if not self.mainWindow.processor.isSaving:
+                    if not self.BUFFER_PROCESSOR.isSaving:
                         full_buffer = self.current_buffer
                         self.current_buffer = self.buffer1 if self.current_buffer is self.buffer2 else self.buffer2
                         self.index = 0
                         self.processor_signal.emit(full_buffer)
                     else:
+                        self.mainWindow.automatic_mode = False
+                        self.mainWindow.stop_for_error = True
+                        self.mainWindow.trigger_adquisition_signal.emit()
                         raise Exception("Fatal error thread race condition reached when saving into disk!")
         
         except Exception as e:
@@ -170,7 +175,7 @@ class DeviceCommunicator(QObject):
         self.AnalogTasks = []
         for n, device in enumerate(self.mainWindow.CHANNELS):
             self.AnalogTasks.append(DAQTask(PLOT_BUFFER=self.mainWindow.plot_buffer,
-                                BUFFER_PROCESSOR_SIGNAL=self.mainWindow.buffer_processors[n].process_buffer_signal,
+                                BUFFER_PROCESSOR=self.mainWindow.buffer_processors[n],
                                 SIGNAL_SELECTOR=None,
                                 BUFFER_SIZE=self.mainWindow.BUFFER_SIZE,
                                 CHANNELS=device["DAQ_CHANNELS"],
@@ -264,13 +269,15 @@ class DeviceCommunicator(QObject):
         self.DO_task_PrepareRaspberry.set_line(0)
         self.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
 
-        if self.task.index != 0:
-            data = self.task.current_buffer[:self.task.index]
+        for n, task in enumerate(self.AnalogTasks):
+            if task.index != 0:
 
-            # In this case this thread will do the saving
-            self.mainWindow.processor.save_data(data)
+                data = task.current_buffer[:task.index]
 
-            self.task.index = 0
+                # In this case this thread will do the saving
+                self.mainWindow.buffer_processors[n].save_data(data)
+
+                task.index = 0
 
         if self.is_rb_connected:
             loop_counter = 0
@@ -285,7 +292,7 @@ class DeviceCommunicator(QObject):
                 print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
                 return
 
-            self.raspberry.download_folder(self.rb_remote_path, local_path=self.mainWindow.processor.local_path)
+            self.raspberry.download_folder(self.rb_remote_path, local_path=self.mainWindow.local_path[0])
             self.raspberry.remove_files_with_extension(self.rb_remote_path)
 
         if self.mainWindow.automatic_mode:
@@ -356,6 +363,7 @@ class AdquisitionProgram(QWidget):
         self.CHANNELS = CHANNELS
         
         self.automatic_mode = automatic_mode
+        self.stop_for_error = False
         self.RESISTANCE_DATA = RESISTANCE_DATA
         self.iterations = 0
         self.iteration_index = 0
@@ -364,6 +372,7 @@ class AdquisitionProgram(QWidget):
         self.mainWindowButtons = mainWindowButtons
         self.mainWindowParamGroups = mainWindowParamGroups
         self.actual_plotter = None
+        self.local_path = [""]
 
         # Check RESISTANCE_DATA when automatic_mode enabled
         if self.automatic_mode:
@@ -433,11 +442,12 @@ class AdquisitionProgram(QWidget):
         # Buffer processor and thread for each DAQ Task
         self.buffer_processors = []
         self.thread_savers = []
-        for n in range(len(self.CHANNELS)):
-            self.buffer_processors.append(BufferProcessor(self.SAMPLE_RATE, self, channel_config=None))
+        for n, device in enumerate(self.CHANNELS):
+            self.buffer_processors.append(BufferProcessor(fs=self.SAMPLE_RATE,
+                                                          mainWindowReference=self,
+                                                          channel_config=device["DAQ_CHANNELS"],
+                                                          task_name=device["NAME"]))
             self.thread_savers.append(QThread())
-
-        for n in range(len(self.CHANNELS)):
             self.buffer_processors[n].moveToThread(self.thread_savers[n])
             self.thread_savers[n].start()
 
@@ -531,10 +541,11 @@ class AdquisitionProgram(QWidget):
     @pyqtSlot()
     def start_adquisition_success(self):
         os.makedirs(os.path.join(self.exp_dir, "RawData"), exist_ok=True)
-        self.processor.local_path = os.path.join(self.exp_dir, "RawData", self.exp_id)
-        os.makedirs(self.processor.local_path, exist_ok=True)
+        self.local_path[0] = os.path.join(self.exp_dir, "RawData", self.exp_id)
+        os.makedirs(self.local_path[0], exist_ok=True)
 
-        self.processor.timestamp = 0
+        for processor in self.buffer_processors:
+            processor.timestamp = 0
 
         self.remaining_seconds = self.timer_spinbox.value()
         self.countdown_display.setText(f"Remaining time: {self.remaining_seconds} s")
@@ -548,17 +559,17 @@ class AdquisitionProgram(QWidget):
     def stop_adquisition_success(self):
         if self.should_save_data:
             
-            self.daq_file = Pickle_merge(folder_path=self.processor.local_path, exp_id=self.exp_id)
+            self.daq_file = Pickle_merge(folder_path=self.local_path[0], exp_id=self.exp_id, groupby=["Dev1", "Dev2"])
             
             if self.dev_comunicator.is_rb_connected:
-                self.motor_file = CSV_merge(folder_path=self.processor.local_path, exp_id=self.exp_id)
+                self.motor_file = CSV_merge(folder_path=self.local_path[0], exp_id=self.exp_id)
             else:
                 self.motor_file = ""
 
             self.add_experiment_row()
             
             # Delete files after merge
-            shutil.rmtree(self.processor.local_path)
+            shutil.rmtree(self.local_path[0])
             
             print("Experiment ended succesfully!")
 
@@ -579,6 +590,14 @@ class AdquisitionProgram(QWidget):
 
     @pyqtSlot()
     def trigger_adquisition(self):
+
+        if self.stop_for_error:
+            # STOP ADQUISITION
+            self.measurement_timer.stop()
+            self.countdown_display.setText("Remaining time: -")
+            self.dev_comunicator.stop_adquisition_signal.emit()
+            print("Stopped adquisition due to an error.")
+            return
 
         if self.sender() == self.button and self.automatic_mode:
             print("Automatic mode has been disabled, stopping adquisition.")
@@ -712,9 +731,9 @@ class AdquisitionProgram(QWidget):
             self.thread_communicator.quit()
             self.thread_communicator.wait()
 
-            if self.moveLinMot[0] and os.path.isdir(self.processor.local_path):
-                shutil.rmtree(self.processor.local_path)
-                print(f"Temporary folder {self.processor.local_path} deleted on exit.")
+            if self.moveLinMot[0] and os.path.isdir(self.local_path[0]):
+                shutil.rmtree(self.local_path[0])
+                print(f"Temporary folder {self.local_path[0]} deleted on exit.")
 
         if self.mainWindowButtons:
             for button in self.mainWindowButtons:
@@ -808,7 +827,10 @@ if __name__ == '__main__':
                       'RLOAD_ID': 'Resistance 6'}]
 
     app = QApplication(sys.argv)
-    window = AdquisitionProgram(CHANNELS, automatic_mode=False, RESISTANCE_DATA=resistance_list)
+    window = AdquisitionProgram(CHANNELS,
+                                automatic_mode=False,
+                                RESISTANCE_DATA=resistance_list,
+                                measure_time=10)
     window.show()
     sys.exit(app.exec_())
 
