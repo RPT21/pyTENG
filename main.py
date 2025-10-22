@@ -74,7 +74,6 @@ class MainWindow(QWidget):
         self.blockLayout_ControlPanel = QVBoxLayout()
         self.groupBox_ControlPanel.setLayout(self.blockLayout_ControlPanel)
 
-
         # Connect to DAQ:
         self.RelayCodeLines = RelayCodeLines
         self.LinMotTriggerLine = LinMotTriggerLine
@@ -86,6 +85,7 @@ class MainWindow(QWidget):
 
         # Definim el ParameterGroup ResistancePanel
         self.ResistancePanel = ResistancePanel(DO_task_RelayCode=self.DO_task_RelayCode,
+                                               dictionary_parameters=None,
                                                name='Resistance Panel',
                                                title='Resistance Panel')
 
@@ -114,16 +114,41 @@ class MainWindow(QWidget):
         self.layout.addWidget(self.groupBox_ControlPanel)
 
         # The order of definition is the order of saving into buffer so we need to put the order in the list
-        self.CHANNELS = {
-            "LinMot_Enable": ["Dev1/ai0", DAQmx_Val_RSE, 0],
-            "LinMot_Up_Down": ["Dev1/ai1", DAQmx_Val_RSE, 1],
-            "Voltage": ["Dev1/ai2", DAQmx_Val_Diff, 2],
-            "Current": ["Dev1/ai3", DAQmx_Val_RSE, 3]
+        self.CHANNELS = [
+        {
+            "NAME":"Dev1",
+
+            "DAQ_CHANNELS":{
+                "Voltage": [{"port":"Dev1/ai2", "port_config":DAQmx_Val_Diff}, 0],
+                "Current": [{"port":"Dev1/ai3", "port_config":DAQmx_Val_RSE}, 1],
+            },
+
+            "TRIGGER_SOURCE":None
+        },
+
+        {
+            "NAME":"Dev2",
+
+            "DAQ_CHANNELS":{
+                "LinMot_Enable": [{"port":"Dev2/ai0", "port_config":DAQmx_Val_RSE}, 0],
+                "LinMot_Up_Down": [{"port":"Dev2/ai1", "port_config":DAQmx_Val_RSE}, 1]
+            },
+
+            # "TRIGGER_SOURCE":"PFI0"
+            "TRIGGER_SOURCE":None
         }
+    ]
 
         self.AdquisitionProgram = None
-        self.mainWindowButtons = [self.btnAcq, self.btnLoad]
-        self.mainWindowParamGroups = [self.ResistancePanel, self.LinMotControl, self.RecordingParameters]
+        self.mainWindowButtons = {"btnAcq":self.btnAcq,
+                                  "btnLoad":self.btnLoad}
+        self.mainWindowParamGroups = {"ResistancePanel":self.ResistancePanel,
+                                      "LinMotControl":self.LinMotControl,
+                                      "RecordingParameters":self.RecordingParameters}
+
+        # Activate sigValueChanged events after initialization
+        self.ResistancePanel.ManualTriggering.initialized_success()
+        self.LinMotControl.initialized_success()
 
     def center(self):
         # Get the screen geometry
@@ -161,11 +186,11 @@ class MainWindow(QWidget):
                 param.setValue(False)
 
             # Disable buttons
-            for button in self.mainWindowButtons:
+            for button in self.mainWindowButtons.values():
                 button.setEnabled(False)
 
             # Disable the experiment configuration interface
-            for parameterGroup in self.mainWindowParamGroups:
+            for parameterGroup in self.mainWindowParamGroups.values():
                 set_group_readonly(parameterGroup, True)
 
             self.AdquisitionProgram = AdquisitionProgram(CHANNELS=self.CHANNELS, RESISTANCE_DATA=resistance_list,
@@ -203,10 +228,23 @@ class MainWindow(QWidget):
 
         dictionary_parameters = read_excel(file_path = file_path)
 
-        # Actualitzem el ParameterGroup ResistancePanel
-        self.ResistancePanel = ResistancePanel(dictionary_parameters,
-                                            name='Resistance Panel',
-                                            title='Resistance Panel')
+        # Update ParameterGroup ResistancePanel
+        self.ResistancePanel = ResistancePanel(DO_task_RelayCode=self.DO_task_RelayCode,
+                                               dictionary_parameters=dictionary_parameters,
+                                               name='Resistance Panel',
+                                               title='Resistance Panel')
+
+        # Update the reference of mainWindowParamGroups
+        self.mainWindowParamGroups["ResistancePanel"] = self.ResistancePanel
+
+        # Set the new configuration
+        self.ParameterTree_ControlPanel.setParameters(self.ResistancePanel)
+        self.ParameterTree_ControlPanel.addParameters(self.LinMotControl)
+        self.ParameterTree_ControlPanel.addParameters(self.RecordingParameters)
+
+        # Activate sigValueChanged events after initialization
+        self.ResistancePanel.ManualTriggering.initialized_success()
+
 
     def closeEvent(self, event):
         if self.AdquisitionProgram:
@@ -220,11 +258,6 @@ class MainWindow(QWidget):
         self.DO_task_RelayCode.ClearTask()
 
         event.accept()
-
-    def showEvent(self, event):
-        super().showEvent(event)
-        QTimer.singleShot(0, self.ResistancePanel.ManualTriggering.initialized_success)
-        QTimer.singleShot(0, self.LinMotControl.initialized_success)
 
 
 def main():

@@ -741,11 +741,11 @@ class AdquisitionProgram(QWidget):
                 print(f"Temporary folder {self.local_path[0]} deleted on exit.")
 
         if self.mainWindowButtons:
-            for button in self.mainWindowButtons:
+            for button in self.mainWindowButtons.values():
                 button.setEnabled(True)
 
         if self.mainWindowParamGroups:
-            for param_group in self.mainWindowParamGroups:
+            for param_group in self.mainWindowParamGroups.values():
                 set_group_readonly(param_group, readonly=False)
 
 

@@ -126,14 +126,14 @@ class ResistancePanel(pTypes.GroupParameter):
             self.dictionary_parameters = dictionary_parameters
 
         # Definim el ParameterGroup ResistanceSelection
-        self.ResistanceSelection = ResistanceSelection(self.dictionary_parameters,
+        self.ResistanceSelection = ResistanceSelection(dictionary_parameters=self.dictionary_parameters,
                                                        name='Resistance Selection',
                                                        title='Resistance Selection')
         # Definim el ParameterGroup ManualTriggering
-        self.ManualTriggering = ManualTriggering(self.dictionary_parameters,
+        self.ManualTriggering = ManualTriggering(dictionary_parameters=self.dictionary_parameters,
+                                                 DO_task_RelayCode=DO_task_RelayCode,
                                                  name='Manual Triggering',
-                                                 title='Manual Triggering',
-                                                 DO_task_RelayCode=DO_task_RelayCode)
+                                                 title='Manual Triggering',)
 
         self.addChild(self.ResistanceSelection)
         self.addChild(self.ManualTriggering)
