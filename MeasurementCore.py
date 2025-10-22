@@ -20,6 +20,8 @@ from PyDAQmx import Task
 from RaspberryInterface import RaspberryInterface
 from MyMerger import Pickle_merge, CSV_merge
 from pyqtgraph.parametertree import Parameter, ParameterTree
+import logging
+logging.basicConfig(level=logging.INFO, format='%(message)s')
 
 def set_group_readonly(group, readonly=True):
     group.setReadonly(readonly)
@@ -57,7 +59,7 @@ class BufferProcessor(QObject):
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         df.to_pickle(f"{self.local_path[0]}/DAQ_{self.task_name}_{timestamp}.pkl")
         self.isSaving = False
-        print(f"{self.task_name} -> [+] Saved {len(data)} samples")
+        logging.info(f"{self.task_name} -> [+] Saved {len(data)} samples")
 
 # ---------------- DAQ TASK WITH CALLBACK ----------------
 class DAQTask(Task):
