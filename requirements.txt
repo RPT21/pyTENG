@@ -1,0 +1,8 @@
+pandas
+pandas-stubs
+openpyxl
+PyQt5
+pyqtgraph
+QtPy
+PyDAQmx
+paramiko
