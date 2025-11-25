@@ -123,7 +123,8 @@ class MainWindow(QWidget):
                 "Current": [{"port":"Dev1/ai3", "port_config":DAQmx_Val_RSE}, 1],
             },
 
-            "TRIGGER_SOURCE":None
+            "TRIGGER_SOURCE":"PFI0"
+            # "TRIGGER_SOURCE":None
         },
 
         {
@@ -134,8 +135,8 @@ class MainWindow(QWidget):
                 "LinMot_Up_Down": [{"port":"Dev2/ai1", "port_config":DAQmx_Val_RSE}, 1]
             },
 
-            # "TRIGGER_SOURCE":"PFI0"
-            "TRIGGER_SOURCE":None
+            "TRIGGER_SOURCE":"PFI0"
+            # "TRIGGER_SOURCE":None
         }
     ]
 

@@ -102,7 +102,6 @@ class DAQTask(Task):
 
         self.CfgSampClkTiming("", self.SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, self.SAMPLES_PER_CALLBACK)
         self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, self.SAMPLES_PER_CALLBACK, 0)
-        self.StartTask()
 
     def EveryNCallback(self):
         try:
@@ -129,6 +128,8 @@ class DAQTask(Task):
                         self.mainWindow.stop_for_error = True
                         self.mainWindow.trigger_adquisition_signal.emit()
                         raise Exception("Fatal error thread race condition reached when saving into disk!")
+            else:
+                self.StopTask()
         
         except Exception as e:
             print(f"DAQ error in callback: {e}")
@@ -251,6 +252,7 @@ class DeviceCommunicator(QObject):
 
         for task in self.AnalogTasks:
             task.index = 0
+            task.StartTask()
 
         self.mainWindow.moveLinMot[0] = True
 
@@ -524,6 +526,9 @@ class AdquisitionProgram(QWidget):
         # Set the new plotter
         self.actual_plotter = DAQ_Task_Reference
 
+    def reset_buffer(self):
+        self.plot_buffer.fill(np.nan)
+
     def update_countdown(self):
         if self.remaining_seconds > 0 and self.moveLinMot[0]:
             self.remaining_seconds -= 1
@@ -561,6 +566,7 @@ class AdquisitionProgram(QWidget):
 
     @pyqtSlot()
     def stop_adquisition_success(self):
+        self.reset_buffer()
         if self.should_save_data:
             
             self.daq_file = Pickle_merge(folder_path=self.local_path[0], exp_id=self.exp_id, groupby=self.device_names)
@@ -805,7 +811,7 @@ if __name__ == '__main__':
                 "Current": [{"port":"Dev1/ai3", "port_config":DAQmx_Val_RSE}, 1],
             },
 
-            "TRIGGER_SOURCE":None
+            "TRIGGER_SOURCE":"PFI0"
         },
 
         {
