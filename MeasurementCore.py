@@ -109,11 +109,13 @@ class DAQTask(Task):
             read = c_int32()
             self.ReadAnalogF64(self.SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, data.size, byref(read), None)
 
-            if self.mainWindow.actual_plotter is self:
-                self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = data[:, self.data_column_selector.value()[-1]]
-                self.write_index = (self.write_index + self.SAMPLES_PER_CALLBACK) % self.plot_buffer.size
-
             if self.mainWindow.moveLinMot[0]:
+
+                if self.mainWindow.actual_plotter is self:
+                    self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = data[
+                        :, self.data_column_selector.value()[-1]]
+                    self.write_index = (self.write_index + self.SAMPLES_PER_CALLBACK) % self.plot_buffer.size
+
                 self.current_buffer[self.index:self.index + self.SAMPLES_PER_CALLBACK, :] = data
                 self.index += self.SAMPLES_PER_CALLBACK
 
