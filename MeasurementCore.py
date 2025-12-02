@@ -16,7 +16,7 @@ from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Di
                                     DAQmx_Val_GroupByScanNumber, DAQmx_Val_Acquired_Into_Buffer, 
                                     DAQmx_Val_GroupByChannel, DAQmx_Val_ChanForAllLines)
 from PyQt5.QtCore import Qt, QObject, pyqtSignal, QThread, QTimer, pyqtSlot
-from PyDAQmx import Task
+from PyDAQmx import Task, bool32, DAQmxIsTaskDone
 from RaspberryInterface import RaspberryInterface
 from MyMerger import Pickle_merge, CSV_merge
 from pyqtgraph.parametertree import Parameter, ParameterTree
@@ -93,6 +93,7 @@ class DAQTask(Task):
         self.current_buffer = self.buffer1
         self.index = 0
         self.mainWindow = AdquisitionProgramReference
+        self.stop_at_next_callback = False
 
         for channel in list(self.CHANNELS.values()):
             self.CreateAIVoltageChan(channel[0]["port"], "", channel[0]["port_config"], -10.0, 10.0, DAQmx_Val_Volts, None)
@@ -109,7 +110,9 @@ class DAQTask(Task):
             read = c_int32()
             self.ReadAnalogF64(self.SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, data.size, byref(read), None)
 
-            if self.mainWindow.moveLinMot[0]:
+            if self.mainWindow.moveLinMot[0] or not self.stop_at_next_callback:
+                if not self.mainWindow.moveLinMot[0]:
+                    self.stop_at_next_callback = True
 
                 if self.mainWindow.actual_plotter is self:
                     self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = data[
@@ -269,11 +272,27 @@ class DeviceCommunicator(QObject):
     @pyqtSlot()
     def stop_adquisition(self):
 
-        self.mainWindow.moveLinMot[0] = False
-
         self.DO_task_LinMotTrigger.set_line(0)
         self.DO_task_PrepareRaspberry.set_line(0)
         self.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
+
+        # After stopping LinMot, we need to register the moment when LinMot_Enable = 0
+        self.mainWindow.moveLinMot[0] = False
+
+        # Do an extra DAQ CallBack to add the extra data, so, wait until all DAQ Tasks stopped
+        all_stopped = False
+
+        done = bool32()
+        while not all_stopped:
+            all_stopped = True
+            for task in self.AnalogTasks:
+                DAQmxIsTaskDone(task.taskHandle, byref(done))
+                if not done.value:
+                    all_stopped = False
+                    time.sleep(0.1)
+                    break
+            if all_stopped == True:
+                print("All tasks have stopped, saving data ...")
 
         for n, task in enumerate(self.AnalogTasks):
             if task.index != 0:
@@ -809,8 +828,9 @@ if __name__ == '__main__':
             "NAME":"Dev1",
 
             "DAQ_CHANNELS":{
-                "Voltage": [{"port":"Dev1/ai2", "port_config":DAQmx_Val_Diff}, 0],
-                "Current": [{"port":"Dev1/ai3", "port_config":DAQmx_Val_RSE}, 1],
+                # "Voltage": [{"port":"Dev1/ai2", "port_config":DAQmx_Val_Diff}, 0],
+                "Voltage": [{"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff}, 0],
+                # "Current": [{"port":"Dev1/ai3", "port_config":DAQmx_Val_RSE}, 1],
             },
 
             "TRIGGER_SOURCE":"PFI0"

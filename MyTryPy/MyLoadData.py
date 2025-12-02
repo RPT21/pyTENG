@@ -71,10 +71,11 @@ MotColumnsRenames = {
 
 DaqColumnsRenames = {
     'Time (s)': 'Time',
-    'Signal': 'Voltage',
+    'Voltage': 'Voltage',
+    # 'Signal': 'Voltage',
     'Current': 'Current',
-    'LINMOT_ENABLE': 'Bool1',
-    'LINMOT_UP_DOWN': 'Bool2'
+    'LinMot_Enable': 'Bool1',
+    'LinMot_Up_Down': 'Bool2'
 }
 
 
@@ -200,8 +201,12 @@ def LoadDAQFile(DaqFile):
     
     # Corrections Time
     dfDaq['Time'] -= dfDaq['Time'].iloc[0]
-    
-    # Corrections Voltage
+
+    # The logical 0 has a voltage of 0 V, and the logical 1 has a voltage of 3.3 V, so the equivalent int is 3
+    dfDaq['Bool1'] = dfDaq['Bool1'].replace(3, 1)
+    dfDaq['Bool2'] = dfDaq['Bool2'].replace(3, 1)
+
+    # Corrections Voltage (find the starting point of motor movement and reference voltage from this point)
     j = dfDaq['Bool1'].eq(1).idxmax()
     dfDaq['Voltage'] -= dfDaq['Voltage'][:j].mean()
     
