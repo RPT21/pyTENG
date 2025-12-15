@@ -14,7 +14,8 @@ from ReadExcel import read_excel
 from TreeStructures.ResistancePanel import ResistancePanel
 from TreeStructures.LinMotControl import LinMotControl
 from TreeStructures.RecordingParameters import RecordingParameters
-from MeasurementCore import AdquisitionProgram, DigitalOutputTask_MultipleChannels, DigitalOutputTask
+from MeasurementCore import AdquisitionProgram
+from ClassStructures.DaqInterface import DigitalOutputTask_MultipleChannels, DigitalOutputTask
 
 from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Diff,
                                     DAQmx_Val_Rising, DAQmx_Val_ContSamps,

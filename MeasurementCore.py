@@ -1,25 +1,24 @@
 import os
 import sys
-import time
 import shutil
 import numpy as np
-import pandas as pd
 import pyqtgraph as pg
 from datetime import datetime
-from ctypes import byref, c_int32
 from openpyxl import load_workbook
 from openpyxl.utils import column_index_from_string, get_column_letter
 from PyQt5.QtWidgets import (QApplication, QPushButton, QVBoxLayout, QWidget,
                              QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog)
-from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Diff,
-                                    DAQmx_Val_Rising, DAQmx_Val_ContSamps, 
-                                    DAQmx_Val_GroupByScanNumber, DAQmx_Val_Acquired_Into_Buffer, 
-                                    DAQmx_Val_GroupByChannel, DAQmx_Val_ChanForAllLines)
-from PyQt5.QtCore import Qt, QObject, pyqtSignal, QThread, QTimer, pyqtSlot
-from PyDAQmx import Task, bool32, DAQmxIsTaskDone
-from RaspberryInterface import RaspberryInterface
+from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, pyqtSlot
 from MyMerger import Pickle_merge, CSV_merge
 from pyqtgraph.parametertree import Parameter, ParameterTree
+from ClassStructures.BufferProcessorClass import BufferProcessor
+from ClassStructures.DeviceCommunicatorClass import DeviceCommunicator
+
+from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Diff,
+                                    DAQmx_Val_Rising, DAQmx_Val_ContSamps,
+                                    DAQmx_Val_GroupByScanNumber, DAQmx_Val_Acquired_Into_Buffer,
+                                    DAQmx_Val_GroupByChannel, DAQmx_Val_ChanForAllLines)
+
 import logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 
@@ -30,307 +29,6 @@ def set_group_readonly(group, readonly=True):
             set_group_readonly(child, readonly)
         else:
             child.setReadonly(readonly)
-
-# ---------------- BUFFER PROCESSING THREAD ----------------
-class BufferProcessor(QObject):
-    process_buffer_signal = pyqtSignal(object)
-
-    def __init__(self, fs, mainWindowReference, channel_config, task_name, parent=None):
-        super().__init__(parent)
-        self.fs = fs
-        self.process_buffer_signal.connect(self.save_data)
-        self.timestamp = 0
-        self.mainWindow = mainWindowReference
-        self.local_path = self.mainWindow.local_path
-        self.isSaving = False
-        self.channel_config = channel_config
-        self.task_name = task_name
-
-    @pyqtSlot(object)
-    def save_data(self, data):
-        self.isSaving = True
-        t = np.arange(data.shape[0]) / self.fs + self.timestamp
-        self.timestamp = t[-1] + (t[1] - t[0])
-
-        df = pd.DataFrame({"Time (s)": t})
-        for channel_name in self.channel_config.keys():
-            df[channel_name] = data[:, self.channel_config[channel_name][-1]]
-
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        df.to_pickle(f"{self.local_path[0]}/DAQ_{self.task_name}_{timestamp}.pkl")
-        self.isSaving = False
-        logging.info(f"{self.task_name} -> [+] Saved {len(data)} samples")
-
-# ---------------- DAQ TASK WITH CALLBACK ----------------
-class DAQTask(Task):
-    def __init__(self,
-                 PLOT_BUFFER,
-                 BUFFER_PROCESSOR,
-                 SIGNAL_SELECTOR,
-                 BUFFER_SIZE,
-                 CHANNELS,
-                 SAMPLE_RATE,
-                 SAMPLES_PER_CALLBACK,
-                 AdquisitionProgramReference,
-                 TRIGGER_SOURCE=None):
-
-        super().__init__()
-        
-        self.SAMPLE_RATE = SAMPLE_RATE
-        self.SAMPLES_PER_CALLBACK = SAMPLES_PER_CALLBACK
-        self.BUFFER_SIZE = BUFFER_SIZE
-        self.CHANNELS = CHANNELS
-        self.number_channels = len(self.CHANNELS)
-
-        self.plot_buffer = PLOT_BUFFER
-        self.write_index = 0
-        self.BUFFER_PROCESSOR = BUFFER_PROCESSOR
-        self.processor_signal = BUFFER_PROCESSOR.process_buffer_signal
-        self.data_column_selector = SIGNAL_SELECTOR
-
-        self.buffer1 = np.empty((self.BUFFER_SIZE, self.number_channels))
-        self.buffer2 = np.empty((self.BUFFER_SIZE, self.number_channels))
-        self.current_buffer = self.buffer1
-        self.index = 0
-        self.mainWindow = AdquisitionProgramReference
-        self.stop_at_next_callback = False
-
-        for channel in list(self.CHANNELS.values()):
-            self.CreateAIVoltageChan(channel[0]["port"], "", channel[0]["port_config"], -10.0, 10.0, DAQmx_Val_Volts, None)
-
-        if TRIGGER_SOURCE:
-            self.CfgDigEdgeStartTrig(TRIGGER_SOURCE, DAQmx_Val_Rising)
-
-        self.CfgSampClkTiming("", self.SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, self.SAMPLES_PER_CALLBACK)
-        self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, self.SAMPLES_PER_CALLBACK, 0)
-
-    def EveryNCallback(self):
-        try:
-            data = np.empty((self.SAMPLES_PER_CALLBACK, self.number_channels), dtype=np.float64)
-            read = c_int32()
-            self.ReadAnalogF64(self.SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, data.size, byref(read), None)
-
-            if self.mainWindow.moveLinMot[0] or not self.stop_at_next_callback:
-                if not self.mainWindow.moveLinMot[0]:
-                    self.stop_at_next_callback = True
-
-                if self.mainWindow.actual_plotter is self:
-                    self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = data[
-                        :, self.data_column_selector.value()[-1]]
-                    self.write_index = (self.write_index + self.SAMPLES_PER_CALLBACK) % self.plot_buffer.size
-
-                self.current_buffer[self.index:self.index + self.SAMPLES_PER_CALLBACK, :] = data
-                self.index += self.SAMPLES_PER_CALLBACK
-
-                if self.index >= self.BUFFER_SIZE:
-                    if not self.BUFFER_PROCESSOR.isSaving:
-                        full_buffer = self.current_buffer
-                        self.current_buffer = self.buffer1 if self.current_buffer is self.buffer2 else self.buffer2
-                        self.index = 0
-                        self.processor_signal.emit(full_buffer)
-                    else:
-                        self.mainWindow.automatic_mode = False
-                        self.mainWindow.stop_for_error = True
-                        self.mainWindow.trigger_adquisition_signal.emit()
-                        raise Exception("Fatal error thread race condition reached when saving into disk!")
-            else:
-                self.StopTask()
-        
-        except Exception as e:
-            print(f"DAQ error in callback: {e}")
-            
-        return 0
-
-class DeviceCommunicator(QObject):
-
-    start_adquisition_signal = pyqtSignal()
-    stop_adquisition_signal = pyqtSignal()
-
-    def __init__(self, mainWindowReference, parent=None,
-                 RelayCodeTask = None,
-                 LinMotTriggerTask = None,
-                 LinMotTriggerLine = "Dev1/port0/line7",
-                 PrepareRaspberryLine = "Dev1/port0/line6",
-                 RaspberryStatus_0_Line = "Dev1/port1/line0",
-                 RaspberryStatus_1_Line = "Dev1/port1/line1",
-                 RelayCodeLines = "Dev1/port0/line0:5"):
-
-        super().__init__(parent)
-
-        self.mainWindow = mainWindowReference
-
-        self.rb_hostname = "192.168.100.200"
-        self.rb_port = 22
-        self.rb_username = "TENG"
-        self.rb_password = "raspberry"
-        self.rb_remote_path = "/var/opt/codesys/PlcLogic/FTP_Folder"
-
-        self.raspberry = RaspberryInterface(hostname=self.rb_hostname,
-                                            port=self.rb_port,
-                                            username=self.rb_username,
-                                            password=self.rb_password)
-
-
-        self.is_rb_connected = self.raspberry.connect()
-
-        if not self.is_rb_connected:
-            print("The program will work without using Raspberry Pi.")
-
-        self.start_adquisition_signal.connect(self.start_adquisition)
-        self.stop_adquisition_signal.connect(self.stop_adquisition)
-
-        # DAQ Analog Task
-        self.AnalogTasks = []
-        for n, device in enumerate(self.mainWindow.CHANNELS):
-            self.AnalogTasks.append(DAQTask(PLOT_BUFFER=self.mainWindow.plot_buffer,
-                                BUFFER_PROCESSOR=self.mainWindow.buffer_processors[n],
-                                SIGNAL_SELECTOR=None,
-                                BUFFER_SIZE=self.mainWindow.BUFFER_SIZE,
-                                CHANNELS=device["DAQ_CHANNELS"],
-                                SAMPLE_RATE=self.mainWindow.SAMPLE_RATE,
-                                SAMPLES_PER_CALLBACK=self.mainWindow.SAMPLES_PER_CALLBACK,
-                                AdquisitionProgramReference=self.mainWindow,
-                                TRIGGER_SOURCE=device["TRIGGER_SOURCE"]))
-
-        # DAQ Digital task relay control line 0
-        if not RelayCodeTask:
-            self.DO_task_RelayCode = DigitalOutputTask_MultipleChannels(channels=RelayCodeLines)
-            self.DO_task_RelayCode.StartTask()
-        else:
-            self.DO_task_RelayCode = RelayCodeTask
-
-        # DAQ Digital Task LinMot
-        if not LinMotTriggerTask:
-            self.DO_task_LinMotTrigger = DigitalOutputTask(line=LinMotTriggerLine)
-            self.DO_task_LinMotTrigger.StartTask()
-        else:
-            self.DO_task_LinMotTrigger = LinMotTriggerTask
-
-        # DAQ Digital Task Prepare Raspberry
-        self.DO_task_PrepareRaspberry = DigitalOutputTask(line=PrepareRaspberryLine)
-        self.DO_task_PrepareRaspberry.StartTask()
-
-        # Raspberry Read Task status bit 0
-        self.DI_task_Raspberry_status_0 = DigitalInputTask(line=RaspberryStatus_0_Line)
-        self.DI_task_Raspberry_status_0.StartTask()
-
-        # Raspberry Read Task status bit 1
-        self.DI_task_Raspberry_status_1 = DigitalInputTask(line=RaspberryStatus_1_Line)
-        self.DI_task_Raspberry_status_1.StartTask()
-
-    @pyqtSlot()
-    def start_adquisition(self, iteration=0):
-
-        if self.is_rb_connected:
-            if iteration >= 5:
-                print("\033[91mRaspberry Pi is not responding for 5 trials, stopping... \033[0m")
-                return
-
-            self.DO_task_PrepareRaspberry.set_line(1)
-
-            loop_counter = 0
-            while loop_counter < 10000:
-                status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
-                status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
-
-                if status_bit_0 == 0 and status_bit_1 == 0:
-                    loop_counter += 1
-                elif status_bit_0 == 1 and status_bit_1 == 0:
-                    break
-                elif status_bit_0 == 0 and status_bit_1 == 1:
-                    self.DO_task_PrepareRaspberry.set_line(0)
-                    print("\033[91mError, impossible to prepare raspberry to record, check codesys invalid license error. Resetting Codesys, please wait... \033[0m")
-                    self.raspberry.reset_codesys()
-                    self.start_adquisition(iteration = iteration + 1)
-                    return
-                else:
-                    self.DO_task_PrepareRaspberry.set_line(0)
-                    print("\033[91mError, EtherCAT bus is not working, resetting Codesys, please wait...\033[0m")
-                    self.raspberry.reset_codesys()
-                    self.start_adquisition()
-                    return
-
-            if loop_counter >= 10000:
-                self.DO_task_PrepareRaspberry.set_line(0)
-                print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
-                return
-
-        for task in self.AnalogTasks:
-            task.index = 0
-            task.StartTask()
-
-        self.mainWindow.moveLinMot[0] = True
-
-        if self.mainWindow.automatic_mode:
-            self.DO_task_RelayCode.set_lines(self.mainWindow.RESISTANCE_DATA[self.mainWindow.iteration_index]["DAQ_CODE"])
-        else:
-            self.DO_task_RelayCode.set_lines(self.mainWindow.DAQ_CODE)
-
-        self.DO_task_LinMotTrigger.set_line(1)
-        self.mainWindow.start_adquisition_success_signal.emit()
-
-    @pyqtSlot()
-    def stop_adquisition(self):
-
-        self.DO_task_LinMotTrigger.set_line(0)
-        self.DO_task_PrepareRaspberry.set_line(0)
-        self.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
-
-        # After stopping LinMot, we need to register the moment when LinMot_Enable = 0
-        self.mainWindow.moveLinMot[0] = False
-
-        # Do an extra DAQ CallBack to add the extra data, so, wait until all DAQ Tasks stopped
-        all_stopped = False
-
-        done = bool32()
-        while not all_stopped:
-            all_stopped = True
-            for task in self.AnalogTasks:
-                DAQmxIsTaskDone(task.taskHandle, byref(done))
-                if not done.value:
-                    all_stopped = False
-                    time.sleep(0.1)
-                    break
-            if all_stopped == True:
-                print("All tasks have stopped, saving data ...")
-
-        for n, task in enumerate(self.AnalogTasks):
-            if task.index != 0:
-
-                data = task.current_buffer[:task.index]
-
-                # In this case this thread will do the saving
-                self.mainWindow.buffer_processors[n].save_data(data)
-
-                task.index = 0
-
-        if self.is_rb_connected:
-            loop_counter = 0
-            while loop_counter < 10000:
-                status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
-                status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
-                if status_bit_0 == 0 and status_bit_1 == 0:
-                    break
-                loop_counter += 1
-
-            if loop_counter >= 10000:
-                print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
-                return
-
-            self.raspberry.download_folder(self.rb_remote_path, local_path=self.mainWindow.local_path[0])
-            self.raspberry.remove_files_with_extension(self.rb_remote_path)
-
-        if self.mainWindow.automatic_mode:
-
-            # Wait motor return to the origin position and increase iteration_index
-            self.mainWindow.update_button_signal.emit()
-            self.mainWindow.iteration_index += 1
-
-            if self.mainWindow.iteration_index <= self.mainWindow.iterations:
-                print("Waiting LinMot to return to origin position")
-                time.sleep(5)
-
-        self.mainWindow.stop_adquisition_success_signal.emit()
 
 # ---------------- INTERFACE AND PLOT  ----------------
 class AdquisitionProgram(QWidget):
@@ -507,7 +205,7 @@ class AdquisitionProgram(QWidget):
         total_channels = {}
         for n, device in enumerate(self.CHANNELS):
             for channel in device["DAQ_CHANNELS"].keys():
-                device["DAQ_CHANNELS"][channel].insert(-1, self.dev_comunicator.AnalogTasks[n])
+                device["DAQ_CHANNELS"][channel].insert(-1, self.dev_comunicator.AdquisitionTasks[n])
             total_channels = total_channels | device["DAQ_CHANNELS"]
 
         # Signal Selector
@@ -515,11 +213,11 @@ class AdquisitionProgram(QWidget):
         self.signal_selector.sigValueChanged.connect(self._update_DAQ_Plot_Buffer)
 
         # Now we can assign the signal selector to the DAQs:
-        for task in self.dev_comunicator.AnalogTasks:
+        for task in self.dev_comunicator.AdquisitionTasks:
             task.data_column_selector = self.signal_selector
 
         # Assign plot buffer to a DAQ Task
-        self.actual_plotter = self.dev_comunicator.AnalogTasks[0]
+        self.actual_plotter = self.dev_comunicator.AdquisitionTasks[0]
 
         # Set the layout
         self.tree = ParameterTree()
@@ -734,7 +432,7 @@ class AdquisitionProgram(QWidget):
 
         if not self.xClose:
             # Cleanup DAQ tasks
-            for task in self.dev_comunicator.AnalogTasks:
+            for task in self.dev_comunicator.AdquisitionTasks:
                 task.StopTask()
                 task.ClearTask()
 
@@ -787,38 +485,6 @@ class AdquisitionProgram(QWidget):
             # Close the QWidget as soon as it is created adding in the event loop a QTimer event
             QTimer.singleShot(0, self.close)
 
-# ---------------- DIGITAL IO TASKS ----------------
-class DigitalOutputTask(Task):
-    def __init__(self, line):
-        super().__init__()
-        self.CreateDOChan(line, "", DAQmx_Val_ChanForAllLines)
-        self.set_line(0)
-
-    def set_line(self, value):
-        data = np.array([value], dtype=np.uint8)
-        self.WriteDigitalLines(1, 1, 10.0, DAQmx_Val_GroupByChannel, data, None, None)
-
-class DigitalOutputTask_MultipleChannels(Task):
-    def __init__(self, channels):
-        Task.__init__(self)
-        self.CreateDOChan(channels, "", DAQmx_Val_ChanForAllLines)
-
-    def set_lines(self, values):
-        """values must be a list or an array of N values of type uint8 (0 or 1)"""
-        data = np.array(values, dtype=np.uint8)
-        self.WriteDigitalLines(1, 1, 10.0, DAQmx_Val_GroupByChannel, data, None, None)
-
-class DigitalInputTask(Task):
-    def __init__(self, line):
-        super().__init__()
-        self.CreateDIChan(line, "", DAQmx_Val_ChanForAllLines)
-
-    def read_line(self):
-        data = np.zeros(1, dtype=np.uint8)
-        read = c_int32()
-        self.ReadDigitalLines(1, 10.0, 0, data, 1, read, None, None)
-        return data[0]
-
 # ---------------- MAIN ----------------
 if __name__ == '__main__':
 
@@ -833,18 +499,25 @@ if __name__ == '__main__':
                 # "Current": [{"port":"Dev1/ai3", "port_config":DAQmx_Val_RSE}, 1],
             },
 
-            "TRIGGER_SOURCE":"PFI0"
+            # "TRIGGER_SOURCE": "PFI0",
+            "TRIGGER_SOURCE": None,
+
+            "TYPE": "analog"
         },
 
         {
             "NAME":"Dev2",
 
             "DAQ_CHANNELS":{
-                "LinMot_Enable": [{"port":"Dev2/ai0", "port_config":DAQmx_Val_RSE}, 0],
-                "LinMot_Up_Down": [{"port":"Dev2/ai1", "port_config":DAQmx_Val_RSE}, 1]
+                # "LinMot_Enable": [{"port":"Dev2/ai0", "port_config":DAQmx_Val_RSE}, 0],
+                # "LinMot_Up_Down": [{"port":"Dev2/ai1", "port_config":DAQmx_Val_RSE}, 1]
+                "LinMot_Enable": [{"port":"Dev2/port0/line0", "port_config":None}, 0],
+                "LinMot_Up_Down": [{"port":"Dev2/port0/line1", "port_config":None}, 1]
             },
 
-            "TRIGGER_SOURCE":"PFI0"
+            # "TRIGGER_SOURCE": "PFI0",
+            "TRIGGER_SOURCE": None,
+            "TYPE": "digital"
         }
     ]
 
