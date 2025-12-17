@@ -1,7 +1,7 @@
 from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Diff,
                                     DAQmx_Val_Rising, DAQmx_Val_ContSamps,
                                     DAQmx_Val_GroupByScanNumber, DAQmx_Val_Acquired_Into_Buffer,
-                                    DAQmx_Val_GroupByChannel, DAQmx_Val_ChanForAllLines)
+                                    DAQmx_Val_GroupByChannel, DAQmx_Val_ChanForAllLines, DAQmx_Val_ChanPerLine)
 
 from PyDAQmx import Task, DAQmxIsTaskDone
 import numpy as np
@@ -33,8 +33,8 @@ class DAQTaskBase(Task):
         self.processor_signal = BUFFER_PROCESSOR.process_buffer_signal
         self.data_column_selector = SIGNAL_SELECTOR
 
-        self.buffer1 = np.empty((self.BUFFER_SIZE, self.number_channels))
-        self.buffer2 = np.empty((self.BUFFER_SIZE, self.number_channels))
+        self.buffer1 = np.empty((self.BUFFER_SIZE, self.number_channels), dtype=np.float64)
+        self.buffer2 = np.empty((self.BUFFER_SIZE, self.number_channels), dtype=np.float64)
         self.current_buffer = self.buffer1
         self.index = 0
         self.mainWindow = AdquisitionProgramReference
@@ -61,26 +61,24 @@ class AnalogRead(DAQTaskBase):
         self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, self.SAMPLES_PER_CALLBACK, 0)
 
         # Determine buffer data type
-        self.buffer1.astype(np.float64)
-        self.buffer2.astype(np.float64)
+        self.data = np.empty((self.SAMPLES_PER_CALLBACK, self.number_channels), dtype=np.float64)
 
     def EveryNCallback(self):
         try:
-            data = np.empty((self.SAMPLES_PER_CALLBACK, self.number_channels), dtype=np.float64)
-            read = c_int32()
-            self.ReadAnalogF64(self.SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, data.size,
-                               byref(read), None)
+            samples_read = c_int32()
+            self.ReadAnalogF64(self.SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, self.data, self.data.size,
+                               byref(samples_read), None)
 
             if self.mainWindow.moveLinMot[0] or not self.stop_at_next_callback:
                 if not self.mainWindow.moveLinMot[0]:
                     self.stop_at_next_callback = True
 
                 if self.mainWindow.actual_plotter is self:
-                    self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = data[
+                    self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = self.data[
                         :, self.data_column_selector.value()[-1]]
                     self.write_index = (self.write_index + self.SAMPLES_PER_CALLBACK) % self.plot_buffer.size
 
-                self.current_buffer[self.index:self.index + self.SAMPLES_PER_CALLBACK, :] = data
+                self.current_buffer[self.index:self.index + self.SAMPLES_PER_CALLBACK, :] = self.data
                 self.index += self.SAMPLES_PER_CALLBACK
 
                 if self.index >= self.BUFFER_SIZE:
@@ -106,35 +104,54 @@ class DigitalRead(DAQTaskBase):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        # Save the line index for each channel
+        self.lines_index = list()
+
+        # Create a channel for each line
         for channel in list(self.CHANNELS.values()):
+
+            # Configuration:
+                # DAQmx_Val_ChanForAllLines (uses a UINT32 to read all the port)
+                # DAQmx_Val_ChanPerLine (uses a UINT32 for each line you are reading)
+
+            # Each time you call CreateDIChan, it creates a channel. We have two operating modes:
+            # DAQmx_Val_ChanForAllLines and DAQmx_Val_ChanPerLine. In the first case, each channel returns a sample.
+            # This sample contains the information of all the lines of the port (the specified lines must be on the same port).
+            # On the other hand, if we use DAQmx_Val_ChanPerLine, it returns a sample for each line defined in that channel.
+            # IMPORTANT: Each sample is always a UINT32, and the bit is located in the position of the chosen line;
+            # for example, DI2 is written in bit 2 of the UINT32.
+
             self.CreateDIChan(channel[0]["port"],
                               "",
-                              DAQmx_Val_ChanForAllLines)
+                            DAQmx_Val_ChanForAllLines)
+            self.lines_index.append(int(channel[0]["port"][-1]))
 
         self.CfgSampClkTiming("", self.SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, self.SAMPLES_PER_CALLBACK)
         self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, self.SAMPLES_PER_CALLBACK, 0)
 
         # Determine buffer data type
-        self.buffer1.astype(np.uint32)
-        self.buffer2.astype(np.uint32)
+        self.data = np.empty((self.SAMPLES_PER_CALLBACK, self.number_channels), dtype=np.uint32)
 
     def EveryNCallback(self):
         try:
-            data = np.empty((self.SAMPLES_PER_CALLBACK, self.number_channels), dtype=np.uint32)
-            read = c_int32()
-            self.ReadDigitalU32(self.SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, data, data.size,
-                               byref(read), None)
+            samples_read = c_int32()
+            self.ReadDigitalU32(self.SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, self.data, self.data.size,
+                               byref(samples_read), None)
+
+            # Right-Shift correction (assuming 1 line per channel)
+            for n, index in enumerate(self.lines_index):
+                self.data[:,n] = self.data[:,n] >> index
 
             if self.mainWindow.moveLinMot[0] or not self.stop_at_next_callback:
                 if not self.mainWindow.moveLinMot[0]:
                     self.stop_at_next_callback = True
 
                 if self.mainWindow.actual_plotter is self:
-                    self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = data[
+                    self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = self.data[
                         :, self.data_column_selector.value()[-1]]
                     self.write_index = (self.write_index + self.SAMPLES_PER_CALLBACK) % self.plot_buffer.size
 
-                self.current_buffer[self.index:self.index + self.SAMPLES_PER_CALLBACK, :] = data
+                self.current_buffer[self.index:self.index + self.SAMPLES_PER_CALLBACK, :] = self.data
                 self.index += self.SAMPLES_PER_CALLBACK
 
                 if self.index >= self.BUFFER_SIZE:

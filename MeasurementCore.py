@@ -129,7 +129,7 @@ class AdquisitionProgram(QWidget):
                 self.xClose = True
                 return
 
-        self.plot_buffer = np.empty(self.PLOT_BUFFER_SIZE, dtype=float)
+        self.plot_buffer = np.empty(self.PLOT_BUFFER_SIZE, dtype=np.float64)
         self.plot_buffer.fill(np.nan)
 
         self.plot_widget = pg.PlotWidget()
@@ -535,10 +535,25 @@ if __name__ == '__main__':
                       'RLOAD_ID': 'Resistance 6'}]
 
     app = QApplication(sys.argv)
+
+    # To debug, use this
+    debug = True
+    if debug:
+        exp_dir = r"C:\Users\rpieres\Desktop\Test"
+        tribu_id = "C"
+        rload_id = "Resistance 4"
+    else:
+        exp_dir = None
+        tribu_id = None
+        rload_id = None
+
     window = AdquisitionProgram(CHANNELS,
                                 automatic_mode=False,
                                 RESISTANCE_DATA=resistance_list,
-                                measure_time=10)
+                                measure_time=10,
+                                exp_dir=exp_dir,
+                                tribu_id=tribu_id,
+                                rload_id=rload_id)
     window.show()
     sys.exit(app.exec_())
 
