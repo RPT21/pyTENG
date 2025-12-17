@@ -6,3 +6,6 @@ pyqtgraph
 QtPy
 PyDAQmx
 paramiko
+matplotlib
+scipy
+scipy-stubs
