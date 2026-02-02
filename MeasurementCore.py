@@ -132,6 +132,9 @@ class AdquisitionProgram(QWidget):
         self.plot_buffer = np.empty(self.PLOT_BUFFER_SIZE, dtype=np.float64)
         self.plot_buffer.fill(np.nan)
 
+        self.display_data = np.empty(self.PLOT_BUFFER_SIZE, dtype=np.float64)
+        self.display_data.fill(np.nan)
+
         self.plot_widget = pg.PlotWidget()
         self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
         
@@ -260,11 +263,10 @@ class AdquisitionProgram(QWidget):
     
     def update_plot(self):
         if self.actual_plotter:
-            display_data = np.concatenate((
-                self.plot_buffer[self.actual_plotter.write_index:],
-                self.plot_buffer[:self.actual_plotter.write_index]
-            ))
-            self.curve.setData(display_data)
+            self.display_data[0:(self.PLOT_BUFFER_SIZE - self.actual_plotter.write_index)] = self.plot_buffer[self.actual_plotter.write_index:]
+            self.display_data[(self.PLOT_BUFFER_SIZE - self.actual_plotter.write_index):] = self.plot_buffer[:self.actual_plotter.write_index]
+            self.curve.setData(self.display_data)
+
 
     @pyqtSlot()
     def start_adquisition_success(self):
