@@ -70,6 +70,7 @@ class AdquisitionProgram(QWidget):
         # Define the moveLinmot bool: 
         # We use a list because a bool is not referenced when passed as an argument
         self.moveLinMot = [False]
+        self.xRecording = [False]
         self.LinMotTriggerTask = LinMotTriggerTask
         self.RelayCodeTask = RelayCodeTask
         

@@ -131,11 +131,13 @@ class DeviceCommunicator(QObject):
                 print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
                 return
 
+        self.mainWindow.moveLinMot[0] = True
+
         for task in self.AdquisitionTasks:
             task.index = 0
             task.StartTask()
 
-        self.mainWindow.moveLinMot[0] = True
+        self.mainWindow.xRecording[0] = True
 
         if self.mainWindow.automatic_mode:
             self.DO_task_RelayCode.set_lines(self.mainWindow.RESISTANCE_DATA[self.mainWindow.iteration_index]["DAQ_CODE"])
@@ -206,4 +208,5 @@ class DeviceCommunicator(QObject):
                 print("Waiting LinMot to return to origin position")
                 time.sleep(5)
 
+        self.mainWindow.xRecording[0] = False
         self.mainWindow.stop_adquisition_success_signal.emit()

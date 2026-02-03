@@ -69,6 +69,9 @@ class AnalogRead(DAQTaskBase):
             self.ReadAnalogF64(self.SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, self.data, self.data.size,
                                byref(samples_read), None)
 
+            if not self.mainWindow.xRecording[0]:
+                return
+
             if self.mainWindow.moveLinMot[0] or not self.stop_at_next_callback:
                 if not self.mainWindow.moveLinMot[0]:
                     self.stop_at_next_callback = True
@@ -137,6 +140,9 @@ class DigitalRead(DAQTaskBase):
             samples_read = c_int32()
             self.ReadDigitalU32(self.SAMPLES_PER_CALLBACK, 10.0, DAQmx_Val_GroupByScanNumber, self.data, self.data.size,
                                byref(samples_read), None)
+
+            if not self.mainWindow.xRecording[0]:
+                return
 
             # Right-Shift correction (assuming 1 line per channel)
             for n, index in enumerate(self.lines_index):
