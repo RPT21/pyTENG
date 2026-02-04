@@ -131,20 +131,21 @@ class DeviceCommunicator(QObject):
                 print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
                 return
 
-        self.mainWindow.moveLinMot[0] = True
-
-        for task in self.AdquisitionTasks:
-            task.index = 0
-            task.StartTask()
-
-        self.mainWindow.xRecording[0] = True
-
         if self.mainWindow.automatic_mode:
             self.DO_task_RelayCode.set_lines(self.mainWindow.RESISTANCE_DATA[self.mainWindow.iteration_index]["DAQ_CODE"])
         else:
             self.DO_task_RelayCode.set_lines(self.mainWindow.DAQ_CODE)
 
+        # Start Adquisition Tasks
+        self.mainWindow.moveLinMot[0] = True
+        for task in self.AdquisitionTasks:
+            task.index = 0
+            task.StartTask()
+        self.mainWindow.xRecording[0] = True
+
+        # Do the LinMot trigger
         self.DO_task_LinMotTrigger.set_line(1)
+
         self.mainWindow.start_adquisition_success_signal.emit()
 
     @pyqtSlot()
@@ -196,8 +197,10 @@ class DeviceCommunicator(QObject):
 
                 task.index = 0
 
-            self.raspberry.download_folder(self.rb_remote_path, local_path=self.mainWindow.local_path[0])
-            self.raspberry.remove_files_with_extension(self.rb_remote_path)
+        # Download the data from raspberry and reset xRecording
+        self.raspberry.download_folder(self.rb_remote_path, local_path=self.mainWindow.local_path[0])
+        self.raspberry.remove_files_with_extension(self.rb_remote_path)
+        self.mainWindow.xRecording[0] = False
 
         if self.mainWindow.automatic_mode:
 
@@ -209,5 +212,4 @@ class DeviceCommunicator(QObject):
                 print("Waiting LinMot to return to origin position")
                 time.sleep(5)
 
-        self.mainWindow.xRecording[0] = False
         self.mainWindow.stop_adquisition_success_signal.emit()

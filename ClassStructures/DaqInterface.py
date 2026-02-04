@@ -38,7 +38,10 @@ class DAQTaskBase(Task):
         self.current_buffer = self.buffer1
         self.index = 0
         self.mainWindow = AdquisitionProgramReference
-        self.stop_at_next_callback = False
+
+        # Do extra callbacks when LinMot is returning to the origin
+        self.additional_callback_index = 0
+        self.total_additional_callbacks = 2
 
         if TRIGGER_SOURCE:
             self.CfgDigEdgeStartTrig(TRIGGER_SOURCE, DAQmx_Val_Rising)
@@ -72,9 +75,9 @@ class AnalogRead(DAQTaskBase):
             if not self.mainWindow.xRecording[0]:
                 return
 
-            if self.mainWindow.moveLinMot[0] or not self.stop_at_next_callback:
+            if self.mainWindow.moveLinMot[0] or not (self.additional_callback_index == self.total_additional_callbacks):
                 if not self.mainWindow.moveLinMot[0]:
-                    self.stop_at_next_callback = True
+                    self.additional_callback_index += 1
 
                 if self.mainWindow.actual_plotter is self:
                     self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = self.data[
@@ -96,6 +99,7 @@ class AnalogRead(DAQTaskBase):
                         self.mainWindow.trigger_adquisition_signal.emit()
                         raise Exception("Fatal error thread race condition reached when saving into disk!")
             else:
+                self.additional_callback_index = 0
                 self.StopTask()
 
         except Exception as e:
@@ -148,9 +152,9 @@ class DigitalRead(DAQTaskBase):
             for n, index in enumerate(self.lines_index):
                 self.data[:,n] = self.data[:,n] >> index
 
-            if self.mainWindow.moveLinMot[0] or not self.stop_at_next_callback:
+            if self.mainWindow.moveLinMot[0] or not (self.additional_callback_index == self.total_additional_callbacks):
                 if not self.mainWindow.moveLinMot[0]:
-                    self.stop_at_next_callback = True
+                    self.additional_callback_index += 1
 
                 if self.mainWindow.actual_plotter is self:
                     self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = self.data[
@@ -172,6 +176,7 @@ class DigitalRead(DAQTaskBase):
                         self.mainWindow.trigger_adquisition_signal.emit()
                         raise Exception("Fatal error thread race condition reached when saving into disk!")
             else:
+                self.additional_callback_index = 0
                 self.StopTask()
 
         except Exception as e:
