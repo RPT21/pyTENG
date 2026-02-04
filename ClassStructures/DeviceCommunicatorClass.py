@@ -154,10 +154,24 @@ class DeviceCommunicator(QObject):
         self.DO_task_PrepareRaspberry.set_line(0)
         self.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
 
-        # After stopping LinMot, we need to register the moment when LinMot_Enable = 0
+        # Wait until raspberry has saved the LinMot_Enable = 0, then stop the DAQ Adquisition
+        if self.is_rb_connected:
+            loop_counter = 0
+            while loop_counter < 10000:
+                status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
+                status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
+                if status_bit_0 == 0 and status_bit_1 == 0:
+                    break
+                loop_counter += 1
+
+            if loop_counter >= 10000:
+                print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
+                return
+
+        # After stopping LinMot, we need to register the moment when LinMot_Enable = 0 in the DAQ
         self.mainWindow.moveLinMot[0] = False
 
-        # Do an extra DAQ CallBack to add the extra data, so, wait until all DAQ Tasks stopped
+        # Wait until all DAQ Tasks stopped (doing an extra callback to store the data)
         all_stopped = False
 
         done = bool32()
@@ -181,19 +195,6 @@ class DeviceCommunicator(QObject):
                 self.mainWindow.buffer_processors[n].save_data(data)
 
                 task.index = 0
-
-        if self.is_rb_connected:
-            loop_counter = 0
-            while loop_counter < 10000:
-                status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
-                status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
-                if status_bit_0 == 0 and status_bit_1 == 0:
-                    break
-                loop_counter += 1
-
-            if loop_counter >= 10000:
-                print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
-                return
 
             self.raspberry.download_folder(self.rb_remote_path, local_path=self.mainWindow.local_path[0])
             self.raspberry.remove_files_with_extension(self.rb_remote_path)
