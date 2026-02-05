@@ -98,37 +98,53 @@ class DeviceCommunicator(QObject):
     def start_adquisition(self, iteration=0):
 
         if self.is_rb_connected:
-            if iteration >= 5:
-                print("\033[91mRaspberry Pi is not responding for 5 trials, stopping... \033[0m")
-                return
 
             self.DO_task_PrepareRaspberry.set_line(1)
 
             loop_counter = 0
-            while loop_counter < 10000:
+            max_iter = 10  # Wait time is 0.1, so it is 1 second
+
+            while loop_counter < max_iter:
                 status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
                 status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
 
                 if status_bit_0 == 0 and status_bit_1 == 0:
+                    # Not responding
                     loop_counter += 1
                 elif status_bit_0 == 1 and status_bit_1 == 0:
+                    # OK code
                     break
                 elif status_bit_0 == 0 and status_bit_1 == 1:
+                    # Error code
                     self.DO_task_PrepareRaspberry.set_line(0)
-                    print("\033[91mError, impossible to prepare raspberry to record, check codesys invalid license error. Resetting Codesys, please wait... \033[0m")
-                    self.raspberry.reset_codesys()
-                    self.start_adquisition(iteration = iteration + 1)
-                    return
+                    if iteration == 0:
+                        print("\033[91mError, impossible to prepare raspberry to record, resetting Codesys, please wait... \033[0m")
+                        self.raspberry.reset_codesys()
+                        self.start_adquisition(iteration = 1)
+                        return
+                    else:
+                        print("\033[91mError, Raspberry is having an issue, check disk space or codesys CSV invalid license error\033[0m")
+                        print("Adquisition has stopped due to a Raspberry error")
+                        return
                 else:
+                    # Error code
                     self.DO_task_PrepareRaspberry.set_line(0)
-                    print("\033[91mError, EtherCAT bus is not working, resetting Codesys, please wait...\033[0m")
-                    self.raspberry.reset_codesys()
-                    self.start_adquisition()
-                    return
+                    if iteration == 0:
+                        print("\033[91mError, EtherCAT bus is not working, resetting Codesys, please wait...\033[0m")
+                        self.raspberry.reset_codesys()
+                        self.start_adquisition(iteration = 1)
+                        return
+                    else:
+                        print("\033[91mError, LinMot is not responding, check if the firmware is turned on\033[0m")
+                        print("Adquisition has stopped due to a Raspberry error")
+                        return
 
-            if loop_counter >= 10000:
+                # Wait time
+                time.sleep(0.1)
+
+            if loop_counter >= max_iter:
                 self.DO_task_PrepareRaspberry.set_line(0)
-                print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
+                print("\033[91mError loop counter overflow, Raspberry is not responding\033[0m")
                 return
 
         if self.mainWindow.automatic_mode:
@@ -157,22 +173,38 @@ class DeviceCommunicator(QObject):
 
         # Wait until raspberry has saved the LinMot_Enable = 0, then stop the DAQ Adquisition
         if self.is_rb_connected:
+
             loop_counter = 0
-            while loop_counter < 10000:
+            max_iter = 10  # Wait time is 0.1, so it is 1 second
+
+            while loop_counter < max_iter:
+
                 status_bit_0 = self.DI_task_Raspberry_status_0.read_line()
                 status_bit_1 = self.DI_task_Raspberry_status_1.read_line()
+
                 if status_bit_0 == 0 and status_bit_1 == 0:
+                    # Raspberry returned to idle state
                     break
+
+                # If not, it is still doing something
                 loop_counter += 1
 
-            if loop_counter >= 10000:
-                print("\033[91mError loop counter overflow, raspberry is not responding\033[0m")
+                # Wait time
+                time.sleep(0.1)
+
+            if loop_counter >= max_iter:
+                self.mainWindow.moveLinMot[0] = False  # Stop the adquisition
+                self.raspberry.remove_files_with_extension(self.rb_remote_path)
+                print("\033[91mError loop counter overflow, Raspberry is not responding\033[0m")
                 return
 
-        # After stopping LinMot, we need to register the moment when LinMot_Enable = 0 in the DAQ
+            # Wait time to let the DAQ measure LinMot_Enable = 0
+            time.sleep(0.1)
+
+        # Stop the adquisition
         self.mainWindow.moveLinMot[0] = False
 
-        # Wait until all DAQ Tasks stopped (doing an extra callback to store the data)
+        # Wait until all DAQ Tasks stopped
         all_stopped = False
 
         done = bool32()
