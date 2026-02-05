@@ -99,6 +99,7 @@ class DeviceCommunicator(QObject):
 
         if self.is_rb_connected:
 
+            # Send a trigger to prepare the Raspberry to record data
             self.DO_task_PrepareRaspberry.set_line(1)
 
             loop_counter = 0
@@ -113,6 +114,7 @@ class DeviceCommunicator(QObject):
                     loop_counter += 1
                 elif status_bit_0 == 1 and status_bit_1 == 0:
                     # OK code
+                    self.mainWindow.stop_for_error = False
                     break
                 elif status_bit_0 == 0 and status_bit_1 == 1:
                     # Error code
@@ -120,24 +122,24 @@ class DeviceCommunicator(QObject):
                     if iteration == 0:
                         print("\033[91mError, impossible to prepare raspberry to record, resetting Codesys, please wait... \033[0m")
                         self.raspberry.reset_codesys()
+                        self.mainWindow.stop_for_error = True
                         self.start_adquisition(iteration = 1)
                         return
                     else:
                         print("\033[91mError, Raspberry is having an issue, check disk space or codesys CSV invalid license error\033[0m")
-                        print("Adquisition has stopped due to a Raspberry error")
-                        return
+                        break
                 else:
                     # Error code
                     self.DO_task_PrepareRaspberry.set_line(0)
                     if iteration == 0:
                         print("\033[91mError, EtherCAT bus is not working, resetting Codesys, please wait...\033[0m")
                         self.raspberry.reset_codesys()
+                        self.mainWindow.stop_for_error = True
                         self.start_adquisition(iteration = 1)
                         return
                     else:
                         print("\033[91mError, LinMot is not responding, check if the firmware is turned on\033[0m")
-                        print("Adquisition has stopped due to a Raspberry error")
-                        return
+                        break
 
                 # Wait time
                 time.sleep(0.1)
@@ -147,21 +149,25 @@ class DeviceCommunicator(QObject):
                 print("\033[91mError loop counter overflow, Raspberry is not responding\033[0m")
                 return
 
-        if self.mainWindow.automatic_mode:
-            self.DO_task_RelayCode.set_lines(self.mainWindow.RESISTANCE_DATA[self.mainWindow.iteration_index]["DAQ_CODE"])
-        else:
-            self.DO_task_RelayCode.set_lines(self.mainWindow.DAQ_CODE)
+        if not self.mainWindow.stop_for_error:
 
-        # Start Adquisition Tasks
-        self.mainWindow.moveLinMot[0] = True
-        for task in self.AdquisitionTasks:
-            task.index = 0
-            task.StartTask()
-        self.mainWindow.xRecording[0] = True
+            # Activate the relays
+            if self.mainWindow.automatic_mode:
+                self.DO_task_RelayCode.set_lines(self.mainWindow.RESISTANCE_DATA[self.mainWindow.iteration_index]["DAQ_CODE"])
+            else:
+                self.DO_task_RelayCode.set_lines(self.mainWindow.DAQ_CODE)
 
-        # Do the LinMot trigger
-        self.DO_task_LinMotTrigger.set_line(1)
+            # Start Adquisition Tasks
+            self.mainWindow.moveLinMot[0] = True
+            for task in self.AdquisitionTasks:
+                task.index = 0
+                task.StartTask()
+            self.mainWindow.xRecording[0] = True
 
+            # Do the LinMot trigger
+            self.DO_task_LinMotTrigger.set_line(1)
+
+        # Send the start adquisition success signal
         self.mainWindow.start_adquisition_success_signal.emit()
 
     @pyqtSlot()
@@ -172,7 +178,7 @@ class DeviceCommunicator(QObject):
         self.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
 
         # Wait until raspberry has saved the LinMot_Enable = 0, then stop the DAQ Adquisition
-        if self.is_rb_connected:
+        if self.is_rb_connected and not self.mainWindow.stop_for_error:
 
             loop_counter = 0
             max_iter = 10  # Wait time is 0.1, so it is 1 second
@@ -235,6 +241,18 @@ class DeviceCommunicator(QObject):
             if self.is_rb_connected:
                 self.raspberry.download_folder(self.rb_remote_path, local_path=self.mainWindow.local_path[0])
 
+            # Continue with the next Resistance Load if the program is in automatic mode (and no error found)
+            if self.mainWindow.automatic_mode:
+
+                # Wait motor return to the origin position
+                self.mainWindow.update_button_signal.emit()
+                self.mainWindow.iteration_index += 1
+
+                # Increase iteration_index
+                if self.mainWindow.iteration_index <= self.mainWindow.iterations:
+                    print("Waiting LinMot to return to origin position")
+                    time.sleep(5)
+
         # Remove the Raspberry files to free disk space
         if self.is_rb_connected:
             self.raspberry.remove_files_with_extension(self.rb_remote_path)
@@ -242,14 +260,5 @@ class DeviceCommunicator(QObject):
         # Reset xRecording
         self.mainWindow.xRecording[0] = False
 
-        if self.mainWindow.automatic_mode:
-
-            # Wait motor return to the origin position and increase iteration_index
-            self.mainWindow.update_button_signal.emit()
-            self.mainWindow.iteration_index += 1
-
-            if self.mainWindow.iteration_index <= self.mainWindow.iterations:
-                print("Waiting LinMot to return to origin position")
-                time.sleep(5)
-
+        # Send the stop adquisition success signal
         self.mainWindow.stop_adquisition_success_signal.emit()

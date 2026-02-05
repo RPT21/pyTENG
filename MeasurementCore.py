@@ -130,6 +130,13 @@ class AdquisitionProgram(QWidget):
                 self.xClose = True
                 return
 
+        # Set rload_id if given:
+        if rload_id and not self.automatic_mode:
+            self.rload_id = rload_id
+        else:
+            self.rload_id = None
+
+        # Define the plot widget and the plot buffers
         self.plot_buffer = np.empty(self.PLOT_BUFFER_SIZE, dtype=np.float64)
         self.plot_buffer.fill(np.nan)
 
@@ -138,12 +145,6 @@ class AdquisitionProgram(QWidget):
 
         self.plot_widget = pg.PlotWidget()
         self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
-        
-        # Set rload_id if given:
-        if rload_id and not self.automatic_mode:
-            self.rload_id = rload_id
-        else:
-            self.rload_id = None
 
         # Adquisition control button:
         self.button = QPushButton("START LinMot")
@@ -271,51 +272,67 @@ class AdquisitionProgram(QWidget):
 
     @pyqtSlot()
     def start_adquisition_success(self):
-        os.makedirs(os.path.join(self.exp_dir, "RawData"), exist_ok=True)
-        self.local_path[0] = os.path.join(self.exp_dir, "RawData", self.exp_id)
-        os.makedirs(self.local_path[0], exist_ok=True)
 
-        for processor in self.buffer_processors:
-            processor.timestamp = 0
+        if not self.stop_for_error:
+            self.remaining_seconds = self.timer_spinbox.value()
+            self.countdown_display.setText(f"Remaining time: {self.remaining_seconds} s")
+            self.measurement_timer.start(1000)  # 1 sec
+            self.should_save_data = False
 
-        self.remaining_seconds = self.timer_spinbox.value()
-        self.countdown_display.setText(f"Remaining time: {self.remaining_seconds} s")
-        self.measurement_timer.start(1000)  # 1 sec
-        self.should_save_data = False
+            self.update_button()
+            print("The adquisition has started successfully!")
 
-        self.update_button()
-        print("The adquisition has started successfully!")
+        else:
+            # Close the opened files
+            for processor in self.buffer_processors:
+                processor.close_file()
+
+            # Delete the folder created
+            shutil.rmtree(self.local_path[0])
 
     @pyqtSlot()
     def stop_adquisition_success(self):
+
+        # Reset the plot buffer to NaN values
         self.reset_buffer()
-        if self.should_save_data:
-            
-            self.daq_file = Pickle_merge(folder_path=self.local_path[0], exp_id=self.exp_id, groupby=self.device_names)
-            
-            if self.dev_comunicator.is_rb_connected:
-                self.motor_file = CSV_merge(folder_path=self.local_path[0], exp_id=self.exp_id)
+
+        # Close the opened files
+        for processor in self.buffer_processors:
+            processor.close_file()
+
+        if not self.stop_for_error:
+            if self.should_save_data:
+
+                # Convert the DAQ binary files to pandas dataframes
+                for processor in self.buffer_processors:
+                    processor.Binary_to_Pickle()
+
+                # Merge the LinMot CSV files
+                if self.dev_comunicator.is_rb_connected:
+                    self.motor_file = CSV_merge(folder_path=self.local_path[0], exp_id=self.exp_id)
+                else:
+                    self.motor_file = ""
+
+                self.add_experiment_row()
+
+                print("Experiment ended succesfully!")
             else:
-                self.motor_file = ""
+                print("Experiment interrupted.")
 
-            self.add_experiment_row()
-            
-            # Delete files after merge
-            shutil.rmtree(self.local_path[0])
-            
-            print("Experiment ended succesfully!")
-
-        else:
-            print("Experiment interrupted.")
-
-        if self.automatic_mode:
-            if self.iteration_index <= self.iterations:
-                self.trigger_adquisition()
+            if self.automatic_mode:
+                if self.iteration_index <= self.iterations:
+                    self.trigger_adquisition()
+                else:
+                    print("All iterations finished, exiting.")
+                    self.close()
             else:
-                print("All iterations finished, exiting.")
-                self.close()
+                self.update_button()
         else:
             self.update_button()
+            print("Experiment interrupted due to an error.")
+
+        # Delete temporal files
+        shutil.rmtree(self.local_path[0])
 
     def update_button(self):
         self.button.setText("STOP LinMot" if self.moveLinMot[0] else "START LinMot")
@@ -359,6 +376,15 @@ class AdquisitionProgram(QWidget):
 
             self.date_now = datetime.now().strftime("%d%m%Y_%H%M%S")
             self.exp_id = f"{self.date_now}-{self.tribu_id}-{self.rload_id}"
+
+            # Create necessary folders and define the saving path
+            os.makedirs(os.path.join(self.exp_dir, "RawData"), exist_ok=True)
+            self.local_path[0] = os.path.join(self.exp_dir, "RawData", self.exp_id)
+            os.makedirs(self.local_path[0], exist_ok=True)
+
+            # Open the files to save the data
+            for processor in self.buffer_processors:
+                processor.open_file()
 
             self.dev_comunicator.start_adquisition_signal.emit()
 
