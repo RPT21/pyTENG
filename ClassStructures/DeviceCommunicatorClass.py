@@ -193,10 +193,8 @@ class DeviceCommunicator(QObject):
                 time.sleep(0.1)
 
             if loop_counter >= max_iter:
-                self.mainWindow.moveLinMot[0] = False  # Stop the adquisition
-                self.raspberry.remove_files_with_extension(self.rb_remote_path)
+                self.mainWindow.stop_for_error = True
                 print("\033[91mError loop counter overflow, Raspberry is not responding\033[0m")
-                return
 
             # Wait time to let the DAQ measure LinMot_Enable = 0
             time.sleep(0.1)
