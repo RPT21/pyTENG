@@ -204,9 +204,9 @@ class DeviceCommunicator(QObject):
         # Stop the adquisition
         self.mainWindow.moveLinMot[0] = False
 
-        # Wait until all DAQ Tasks stopped
+        # Wait until all DAQ Tasks have stopped
+        print("Waiting DAQ Tasks to stop ...")
         all_stopped = False
-
         done = bool32()
         while not all_stopped:
             all_stopped = True
@@ -216,22 +216,32 @@ class DeviceCommunicator(QObject):
                     all_stopped = False
                     time.sleep(0.1)
                     break
-            if all_stopped == True:
-                print("All tasks have stopped, saving data ...")
+        print("All tasks have stopped")
 
-        for n, task in enumerate(self.AdquisitionTasks):
-            if task.index != 0:
+        # Save the DAQ data and download the data from the raspberry if no error
+        if not self.mainWindow.stop_for_error:
 
-                data = task.current_buffer[:task.index]
+            # Save the DAQ data
+            print("Saving the remaining data ...")
+            for n, task in enumerate(self.AdquisitionTasks):
+                if task.index != 0:
 
-                # In this case this thread will do the saving
-                self.mainWindow.buffer_processors[n].save_data(data)
+                    data = task.current_buffer[:task.index]
 
-                task.index = 0
+                    # In this case this thread will do the saving
+                    self.mainWindow.buffer_processors[n].save_data(data)
 
-        # Download the data from raspberry and reset xRecording
-        self.raspberry.download_folder(self.rb_remote_path, local_path=self.mainWindow.local_path[0])
-        self.raspberry.remove_files_with_extension(self.rb_remote_path)
+                    task.index = 0
+
+            # Save the Raspberry data
+            if self.is_rb_connected:
+                self.raspberry.download_folder(self.rb_remote_path, local_path=self.mainWindow.local_path[0])
+
+        # Remove the Raspberry files to free disk space
+        if self.is_rb_connected:
+            self.raspberry.remove_files_with_extension(self.rb_remote_path)
+
+        # Reset xRecording
         self.mainWindow.xRecording[0] = False
 
         if self.mainWindow.automatic_mode:
