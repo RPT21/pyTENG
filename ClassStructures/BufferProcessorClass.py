@@ -8,7 +8,7 @@ import os
 class BufferProcessor(QObject):
     process_buffer_signal = pyqtSignal(object)
 
-    def __init__(self, fs, mainWindowReference, channel_config, task_name, parent=None):
+    def __init__(self, fs, mainWindowReference, channel_config, task_name, task_type, parent=None):
         super().__init__(parent)
         self.fs = fs
         self.process_buffer_signal.connect(self.save_data)
@@ -17,6 +17,7 @@ class BufferProcessor(QObject):
         self.isSaving = False
         self.channel_config = channel_config
         self.task_name = task_name
+        self.task_type = task_type
         self.file_handle = None
 
         # Create a list of names and a list of indices
@@ -38,23 +39,23 @@ class BufferProcessor(QObject):
             self.mainWindow.error_flag = True
             self.mainWindow.trigger_acquisition_signal.emit()
         else:
-            logging.info(f"{self.task_name} -> [+] Saved {len(data)} samples")
+            logging.info(f"{self.task_name}_{self.task_type} -> [+] Saved {len(data)} samples")
 
         # The data has been saved or an error has occurred
         self.isSaving = False
 
     def close_file(self):
         self.file_handle.close()
-        print(f"File DAQ_{self.task_name}.bin has been closed")
+        print(f"File DAQ_{self.task_name}_{self.task_type}.bin has been closed")
 
     def open_file(self):
-        self.file_handle = open(f"{self.local_path[0]}/DAQ_{self.task_name}.bin", 'ab')
+        self.file_handle = open(f"{self.local_path[0]}/DAQ_{self.task_name}_{self.task_type}.bin", 'ab')
 
     def Binary_to_Pickle(self):
         """This function converts the numpy binary file to pandas dataframe and saves it as pickle file."""
-        file_path = f"{self.local_path[0]}/DAQ_{self.task_name}.bin"
+        file_path = f"{self.local_path[0]}/DAQ_{self.task_name}_{self.task_type}.bin"
 
-        print(f"\nConverting DAQ_{self.task_name}.bin to Pickle ...")
+        print(f"\nConverting DAQ_{self.task_name}_{self.task_type}.bin to Pickle ...")
 
         # Read the saved data
         raw_data = np.fromfile(file_path, dtype=np.float64)
@@ -71,7 +72,7 @@ class BufferProcessor(QObject):
 
         # Save the dataframe
         rawdata_dir = os.path.dirname(self.local_path[0])
-        filename = f'DAQ-{self.task_name}-{self.mainWindow.exp_id}.pkl'
+        filename = f'DAQ-{self.task_name}_{self.task_type}-{self.mainWindow.exp_id}.pkl'
         df.to_pickle(os.path.join(rawdata_dir, filename))
 
         print("Data saved to location:", os.path.join(rawdata_dir, filename))

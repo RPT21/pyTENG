@@ -175,7 +175,8 @@ class AcquisitionProgram(QWidget):
             self.buffer_processors.append(BufferProcessor(fs=self.SAMPLE_RATE,
                                                           mainWindowReference=self,
                                                           channel_config=device["DAQ_CHANNELS"],
-                                                          task_name=device["NAME"]))
+                                                          task_name=device["NAME"],
+                                                          task_type=device["TYPE"]))
             self.thread_savers.append(QThread())
             self.device_names.append(device["NAME"])
             self.buffer_processors[n].moveToThread(self.thread_savers[n])
