@@ -9,7 +9,7 @@ from openpyxl.utils import column_index_from_string, get_column_letter
 from PyQt5.QtWidgets import (QApplication, QPushButton, QVBoxLayout, QWidget,
                              QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, pyqtSlot
-from MyMerger import Pickle_merge, CSV_merge
+from MyMerger import CSV_merge
 from pyqtgraph.parametertree import Parameter, ParameterTree
 from ClassStructures.BufferProcessorClass import BufferProcessor
 from ClassStructures.DeviceCommunicatorClass import DeviceCommunicator
@@ -31,11 +31,11 @@ def set_group_readonly(group, readonly=True):
             child.setReadonly(readonly)
 
 # ---------------- INTERFACE AND PLOT  ----------------
-class AdquisitionProgram(QWidget):
+class AcquisitionProgram(QWidget):
     
-    trigger_adquisition_signal = pyqtSignal()
-    start_adquisition_success_signal = pyqtSignal()
-    stop_adquisition_success_signal = pyqtSignal()
+    trigger_acquisition_signal = pyqtSignal()
+    start_acquisition_return_signal = pyqtSignal()
+    stop_acquisition_return_signal = pyqtSignal()
     update_button_signal = pyqtSignal()
     
     def __init__(self,
@@ -87,7 +87,7 @@ class AdquisitionProgram(QWidget):
         self.CHANNELS = CHANNELS
         
         self.automatic_mode = automatic_mode
-        self.stop_for_error = False
+        self.error_flag = False
         self.RESISTANCE_DATA = RESISTANCE_DATA
         self.iterations = 0
         self.iteration_index = 0
@@ -146,9 +146,9 @@ class AdquisitionProgram(QWidget):
         self.plot_widget = pg.PlotWidget()
         self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
 
-        # Adquisition control button:
+        # Acquisition control button:
         self.button = QPushButton("START LinMot")
-        self.button.clicked.connect(self.trigger_adquisition)
+        self.button.clicked.connect(self.trigger_acquisition)
         
         # Timer UI elements
         self.timer_label = QLabel("Duration (s):")
@@ -201,16 +201,16 @@ class AdquisitionProgram(QWidget):
         self.timer.start(self.refresh_rate)
 
         # Signal management
-        self.trigger_adquisition_signal.connect(self.trigger_adquisition)
-        self.start_adquisition_success_signal.connect(self.start_adquisition_success)
-        self.stop_adquisition_success_signal.connect(self.stop_adquisition_success)
+        self.trigger_acquisition_signal.connect(self.trigger_acquisition)
+        self.start_acquisition_return_signal.connect(self.start_acquisition_return)
+        self.stop_acquisition_return_signal.connect(self.stop_acquisition_return)
         self.update_button_signal.connect(self.update_button)
 
         # Insert the DAQ Task reference in each channel and generate a dictionary with all channels
         total_channels = {}
         for n, device in enumerate(self.CHANNELS):
             for channel in device["DAQ_CHANNELS"].keys():
-                device["DAQ_CHANNELS"][channel].insert(-1, self.dev_comunicator.AdquisitionTasks[n])
+                device["DAQ_CHANNELS"][channel].insert(-1, self.dev_comunicator.AcquisitionTasks[n])
             total_channels = total_channels | device["DAQ_CHANNELS"]
 
         # Signal Selector
@@ -218,11 +218,11 @@ class AdquisitionProgram(QWidget):
         self.signal_selector.sigValueChanged.connect(self._update_DAQ_Plot_Buffer)
 
         # Now we can assign the signal selector to the DAQs:
-        for task in self.dev_comunicator.AdquisitionTasks:
+        for task in self.dev_comunicator.AcquisitionTasks:
             task.data_column_selector = self.signal_selector
 
         # Assign plot buffer to a DAQ Task
-        self.actual_plotter = self.dev_comunicator.AdquisitionTasks[0]
+        self.actual_plotter = self.dev_comunicator.AcquisitionTasks[0]
 
         # Set the layout
         self.tree = ParameterTree()
@@ -234,8 +234,8 @@ class AdquisitionProgram(QWidget):
         self.layout.addWidget(self.countdown_display)
 
         if self.automatic_mode:
-            print("Starting adquisition in automatic mode.")
-            self.trigger_adquisition()
+            print("Starting acquisition in automatic mode.")
+            self.trigger_acquisition()
 
     def _update_DAQ_Plot_Buffer(self, param, value):
 
@@ -254,14 +254,27 @@ class AdquisitionProgram(QWidget):
         self.plot_buffer.fill(np.nan)
 
     def update_countdown(self):
-        if self.remaining_seconds > 0 and self.moveLinMot[0]:
-            self.remaining_seconds -= 1
-            self.countdown_display.setText(f"Remaining time: {self.remaining_seconds} s")
-        else:
-            self.measurement_timer.stop()
-            self.countdown_display.setText("Remaining time: -")
-            self.should_save_data = True
-            self.trigger_adquisition()
+
+        if self.dev_comunicator.is_rb_connected:
+            # It takes aprox 10e-5 seconds to read the status bits
+            status_bit_0 = self.dev_comunicator.DI_task_Raspberry_status_0.read_line()
+            status_bit_1 = self.dev_comunicator.DI_task_Raspberry_status_1.read_line()
+
+            if not (status_bit_0 == 1 and status_bit_1 == 0):
+                # An error has occurred during the data acquisition
+                print(f"\033[91mError, during the acquisition, the Raspberry sent an error code:\033[0m", f"{status_bit_0}{status_bit_1}")
+                self.error_flag = True
+                self.trigger_acquisition()
+            
+        if not self.error_flag:
+            if self.remaining_seconds > 0 and self.moveLinMot[0]:
+                self.remaining_seconds -= 1
+                self.countdown_display.setText(f"Remaining time: {self.remaining_seconds} s")
+            else:
+                self.measurement_timer.stop()
+                self.countdown_display.setText("Remaining time: -")
+                self.should_save_data = True
+                self.trigger_acquisition()
     
     def update_plot(self):
         if self.actual_plotter:
@@ -271,16 +284,16 @@ class AdquisitionProgram(QWidget):
 
 
     @pyqtSlot()
-    def start_adquisition_success(self):
+    def start_acquisition_return(self):
 
-        if not self.stop_for_error:
+        if not self.error_flag:
             self.remaining_seconds = self.timer_spinbox.value()
             self.countdown_display.setText(f"Remaining time: {self.remaining_seconds} s")
             self.measurement_timer.start(1000)  # 1 sec
             self.should_save_data = False
 
             self.update_button()
-            print("The adquisition has started successfully!")
+            print("The acquisition has started successfully!")
 
         else:
             # Close the opened files
@@ -291,7 +304,7 @@ class AdquisitionProgram(QWidget):
             shutil.rmtree(self.local_path[0])
 
     @pyqtSlot()
-    def stop_adquisition_success(self):
+    def stop_acquisition_return(self):
 
         # Reset the plot buffer to NaN values
         self.reset_buffer()
@@ -300,7 +313,7 @@ class AdquisitionProgram(QWidget):
         for processor in self.buffer_processors:
             processor.close_file()
 
-        if not self.stop_for_error:
+        if not self.error_flag:
             if self.should_save_data:
 
                 # Convert the DAQ binary files to pandas dataframes
@@ -321,7 +334,7 @@ class AdquisitionProgram(QWidget):
 
             if self.automatic_mode:
                 if self.iteration_index <= self.iterations:
-                    self.trigger_adquisition()
+                    self.trigger_acquisition()
                 else:
                     print("All iterations finished, exiting.")
                     self.close()
@@ -338,21 +351,21 @@ class AdquisitionProgram(QWidget):
         self.button.setText("STOP LinMot" if self.moveLinMot[0] else "START LinMot")
 
     @pyqtSlot()
-    def trigger_adquisition(self):
+    def trigger_acquisition(self):
 
         if self.sender() == self.button and self.automatic_mode:
-            print("Automatic mode has been disabled, stopping adquisition.")
+            print("Automatic mode has been disabled, stopping acquisition.")
             self.automatic_mode = False
 
-        if self.stop_for_error:
+        if self.error_flag:
             if self.sender() == self.button:
-                self.stop_for_error = False
+                self.error_flag = False
             else:
                 # STOP ADQUISITION
                 self.measurement_timer.stop()
                 self.countdown_display.setText("Remaining time: -")
-                self.dev_comunicator.stop_adquisition_signal.emit()
-                print("Stopped adquisition due to an error.")
+                self.dev_comunicator.stop_acquisition_signal.emit()
+                print("Stopped acquisition due to an error.")
                 return
 
         if self.automatic_mode:
@@ -362,7 +375,7 @@ class AdquisitionProgram(QWidget):
             # STOP ADQUISITION
             self.measurement_timer.stop()
             self.countdown_display.setText("Remaining time: -")
-            self.dev_comunicator.stop_adquisition_signal.emit()
+            self.dev_comunicator.stop_acquisition_signal.emit()
         else:
             # START ADQUISITION
             if not self.rload_id and not self.automatic_mode:
@@ -386,7 +399,7 @@ class AdquisitionProgram(QWidget):
             for processor in self.buffer_processors:
                 processor.open_file()
 
-            self.dev_comunicator.start_adquisition_signal.emit()
+            self.dev_comunicator.start_acquisition_signal.emit()
 
     def add_experiment_row(self):
         """Add a new row to ExpsDescription.xlsx with the experiment data if it doesn't already exist."""
@@ -461,7 +474,7 @@ class AdquisitionProgram(QWidget):
 
         if not self.xClose:
             # Cleanup DAQ tasks
-            for task in self.dev_comunicator.AdquisitionTasks:
+            for task in self.dev_comunicator.AcquisitionTasks:
                 task.StopTask()
                 task.ClearTask()
 
@@ -576,7 +589,7 @@ if __name__ == '__main__':
         tribu_id = None
         rload_id = None
 
-    window = AdquisitionProgram(CHANNELS,
+    window = AcquisitionProgram(CHANNELS,
                                 automatic_mode=False,
                                 RESISTANCE_DATA=resistance_list,
                                 measure_time=10,

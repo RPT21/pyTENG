@@ -4,7 +4,7 @@ from qtpy import QtWidgets
 from qtpy.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QFileDialog, QPushButton, QDesktopWidget
 
 # Importing pyqtgraph (module of C/C++ Qt framework) to do ParameterTree widgets and plotting
-from pyqtgraph.parametertree import Parameter, ParameterTree
+from pyqtgraph.parametertree import ParameterTree
 
 # Accessing python interpreter variables and functions
 import sys
@@ -14,15 +14,13 @@ from ReadExcel import read_excel
 from TreeStructures.ResistancePanel import ResistancePanel
 from TreeStructures.LinMotControl import LinMotControl
 from TreeStructures.RecordingParameters import RecordingParameters
-from MeasurementCore import AdquisitionProgram
+from MeasurementCore import AcquisitionProgram
 from ClassStructures.DaqInterface import DigitalOutputTask_MultipleChannels, DigitalOutputTask
 
 from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Diff,
                                     DAQmx_Val_Rising, DAQmx_Val_ContSamps,
                                     DAQmx_Val_GroupByScanNumber, DAQmx_Val_Acquired_Into_Buffer,
                                     DAQmx_Val_GroupByChannel, DAQmx_Val_ChanForAllLines)
-
-from PyQt5.QtCore import QTimer
 
 # Function to convert a Parameter into a dict
 def parameter_to_dict(param):
@@ -141,7 +139,7 @@ class MainWindow(QWidget):
         }
     ]
 
-        self.AdquisitionProgram = None
+        self.AcquisitionProgram = None
         self.mainWindowButtons = {"btnAcq":self.btnAcq,
                                   "btnLoad":self.btnLoad}
         self.mainWindowParamGroups = {"ResistancePanel":self.ResistancePanel,
@@ -195,7 +193,7 @@ class MainWindow(QWidget):
             for parameterGroup in self.mainWindowParamGroups.values():
                 set_group_readonly(parameterGroup, True)
 
-            self.AdquisitionProgram = AdquisitionProgram(CHANNELS=self.CHANNELS, RESISTANCE_DATA=resistance_list,
+            self.AcquisitionProgram = AcquisitionProgram(CHANNELS=self.CHANNELS, RESISTANCE_DATA=resistance_list,
                                                          mainWindowButtons=self.mainWindowButtons,
                                                          mainWindowParamGroups=self.mainWindowParamGroups,
                                                          automatic_mode=True,
@@ -213,7 +211,7 @@ class MainWindow(QWidget):
                                                          RaspberryStatus_1_Line=self.RecordingParameters.RaspberryStatus_1_LineParameter.value(),
                                                          RelayCodeLines=self.RecordingParameters.RelayCodeLinesParameter.value()
                                                          )
-            self.AdquisitionProgram.show()
+            self.AcquisitionProgram.show()
         else:
             print("There are no resistances to measure")
 
@@ -249,9 +247,9 @@ class MainWindow(QWidget):
 
 
     def closeEvent(self, event):
-        if self.AdquisitionProgram:
-            if self.AdquisitionProgram.isVisible():
-                self.AdquisitionProgram.close()
+        if self.AcquisitionProgram:
+            if self.AcquisitionProgram.isVisible():
+                self.AcquisitionProgram.close()
 
         self.DO_task_LinMotTrigger.StopTask()
         self.DO_task_LinMotTrigger.ClearTask()

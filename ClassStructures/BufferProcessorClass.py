@@ -1,6 +1,5 @@
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 import numpy as np
-import time
 import logging
 import pandas as pd
 import os
@@ -36,8 +35,8 @@ class BufferProcessor(QObject):
         except Exception as e:
             print("Error saving data: ", e)
             self.mainWindow.automatic_mode = False
-            self.mainWindow.stop_for_error = True
-            self.mainWindow.trigger_adquisition_signal.emit()
+            self.mainWindow.error_flag = True
+            self.mainWindow.trigger_acquisition_signal.emit()
         else:
             logging.info(f"{self.task_name} -> [+] Saved {len(data)} samples")
 
