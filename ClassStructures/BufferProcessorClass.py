@@ -32,6 +32,9 @@ class BufferProcessor(QObject):
 
         # Try to save the data into the disk
         try:
+            # NumPy's tofile() method writes the array data directly to the file object,
+            # avoiding the creation of an intermediate bytes buffer (python bytes object) and thus minimizing
+            # unnecessary memory copies for maximum performance. (It does not use the file_handle.write() method)
             data.tofile(self.file_handle)
         except Exception as e:
             print("Error saving data: ", e)
