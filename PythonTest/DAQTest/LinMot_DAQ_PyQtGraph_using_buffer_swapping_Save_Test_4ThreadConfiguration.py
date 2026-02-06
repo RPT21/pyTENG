@@ -29,7 +29,7 @@ from RaspberryInterface import RaspberryInterface
 # ---------------- CONFIG ----------------
 CHANNEL = "Dev1/ai2"
 SAMPLE_RATE = 10000
-SAMPLES_PER_CALLBACK = 100  # Modulates the adquisition frequency
+SAMPLES_PER_CALLBACK = 100  # Modulates the acquisition frequency
 CALLBACKS_PER_BUFFER = 500 # Modulates when to save data
 BUFFER_SIZE = SAMPLES_PER_CALLBACK * CALLBACKS_PER_BUFFER
 
@@ -159,8 +159,8 @@ class DAQTask(Task):
 
 class DeviceCommunicator(QObject):
 
-    start_adquisition_signal = pyqtSignal()
-    stop_adquisition_signal = pyqtSignal()
+    start_acquisition_signal = pyqtSignal()
+    stop_acquisition_signal = pyqtSignal()
 
     def __init__(self, mainWindowReference, parent=None):
         super().__init__(parent)
@@ -185,8 +185,8 @@ class DeviceCommunicator(QObject):
 
         self.raspberry.execute.emit(lambda: self.raspberry.connect())
 
-        self.start_adquisition_signal.connect(self.start_adquisition)
-        self.stop_adquisition_signal.connect(self.stop_adquisition)
+        self.start_acquisition_signal.connect(self.start_acquisition)
+        self.stop_acquisition_signal.connect(self.stop_acquisition)
 
         # DAQ Analog Task
         self.task = DAQTask(self.mainWindow.plot_buffer, self.mainWindow.processor.process_buffer)
@@ -208,9 +208,9 @@ class DeviceCommunicator(QObject):
         self.DI_task_Raspberry_status_1.StartTask()
 
     @pyqtSlot()
-    def start_adquisition(self):
+    def start_acquisition(self):
 
-        print("Starting adquisition")
+        print("Starting acquisition")
 
         # Get file save location from user:
         print("Please provide a save location for incoming data.")
@@ -260,9 +260,9 @@ class DeviceCommunicator(QObject):
 
 
     @pyqtSlot()
-    def stop_adquisition(self):
+    def stop_acquisition(self):
 
-        print("Stopping adquisition")
+        print("Stopping acquisition")
 
         # Stop LinMot and save data
         self.DO_task_LinMotTrigger.set_line(0)
@@ -310,9 +310,9 @@ class MainWindow(QWidget):
         self.plot_widget = pg.PlotWidget()
         self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
 
-        # Adquisition control button:
+        # Acquisition control button:
         self.button = QPushButton("START LinMot")
-        self.button.clicked.connect(self.trigger_adquisition)
+        self.button.clicked.connect(self.trigger_acquisition)
         self.layout.addWidget(self.button)
         self.layout.addWidget(self.plot_widget)
 
@@ -393,13 +393,13 @@ class MainWindow(QWidget):
     def update_button(self):
         self.button.setText("STOP LinMot" if self.moveLinMot else "START LinMot")
 
-    def trigger_adquisition(self):
+    def trigger_acquisition(self):
         if self.moveLinMot:
             print("moveLinMot is True")
-            self.dev_comunicator.stop_adquisition_signal.emit()
+            self.dev_comunicator.stop_acquisition_signal.emit()
         else:
             print("moveLinMot is False")
-            self.dev_comunicator.start_adquisition_signal.emit()
+            self.dev_comunicator.start_acquisition_signal.emit()
 
 
 class DigitalOutputTask(Task):

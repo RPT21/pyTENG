@@ -23,7 +23,7 @@ from RaspberryInterface import RaspberryInterface
 # ---------------- CONFIG ----------------
 CHANNEL = "Dev1/ai2"
 SAMPLE_RATE = 10000
-SAMPLES_PER_CALLBACK = 100  # Modulates the adquisition frequency
+SAMPLES_PER_CALLBACK = 100  # Modulates the acquisition frequency
 CALLBACKS_PER_BUFFER = 500 # Modulates when to save data
 BUFFER_SIZE = SAMPLES_PER_CALLBACK * CALLBACKS_PER_BUFFER
 
@@ -180,7 +180,7 @@ class MainWindow(QWidget):
 
         self.raspberry.connect()
 
-        # Adquisition control button:
+        # Acquisition control button:
         self.button = QPushButton("START LinMot")
         self.button.clicked.connect(self.toggle_linmot)
         self.layout.addWidget(self.button)

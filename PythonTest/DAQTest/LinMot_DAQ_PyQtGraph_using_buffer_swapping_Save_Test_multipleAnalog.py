@@ -132,7 +132,7 @@ class MainWindow(QWidget):
 
         self.raspberry.connect()
 
-        # Adquisition control button:
+        # Acquisition control button:
         self.button = QPushButton("START LinMot")
         self.button.clicked.connect(self.toggle_linmot)
         self.layout.addWidget(self.button)

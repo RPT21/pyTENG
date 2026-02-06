@@ -69,7 +69,7 @@ class DAQTask(Task):
                  CHANNELS,
                  SAMPLE_RATE,
                  SAMPLES_PER_CALLBACK,
-                 AdquisitionProgramReference):
+                 AcquisitionProgramReference):
 
         super().__init__()
         
@@ -87,7 +87,7 @@ class DAQTask(Task):
         self.buffer2 = np.empty((self.BUFFER_SIZE, 4))
         self.current_buffer = self.buffer1
         self.index = 0
-        self.mainWindow = AdquisitionProgramReference
+        self.mainWindow = AcquisitionProgramReference
 
         for channel in list(self.CHANNELS.values()):
             self.CreateAIVoltageChan(channel[0], "", channel[1], -10.0, 10.0, DAQmx_Val_Volts, None)
@@ -125,8 +125,8 @@ class DAQTask(Task):
 
 class DeviceCommunicator(QObject):
 
-    start_adquisition_signal = pyqtSignal()
-    stop_adquisition_signal = pyqtSignal()
+    start_acquisition_signal = pyqtSignal()
+    stop_acquisition_signal = pyqtSignal()
 
     def __init__(self, mainWindowReference, parent=None,
                  RelayCodeTask = None,
@@ -159,8 +159,8 @@ class DeviceCommunicator(QObject):
             print("The program will work without using Raspberry Pi.")
 
 
-        self.start_adquisition_signal.connect(self.start_adquisition)
-        self.stop_adquisition_signal.connect(self.stop_adquisition)
+        self.start_acquisition_signal.connect(self.start_acquisition)
+        self.stop_acquisition_signal.connect(self.stop_acquisition)
 
         # DAQ Analog Task
         self.task = DAQTask(PLOT_BUFFER=self.mainWindow.plot_buffer,
@@ -170,7 +170,7 @@ class DeviceCommunicator(QObject):
                             CHANNELS=self.mainWindow.CHANNELS,
                             SAMPLE_RATE=self.mainWindow.SAMPLE_RATE,
                             SAMPLES_PER_CALLBACK=self.mainWindow.SAMPLES_PER_CALLBACK,
-                            AdquisitionProgramReference=self.mainWindow)
+                            AcquisitionProgramReference=self.mainWindow)
 
         # DAQ Digital task relay control line 0
         if not RelayCodeTask:
@@ -199,7 +199,7 @@ class DeviceCommunicator(QObject):
         self.DI_task_Raspberry_status_1.StartTask()
 
     @pyqtSlot()
-    def start_adquisition(self, iteration=0):
+    def start_acquisition(self, iteration=0):
 
         if self.is_rb_connected:
             if iteration >= 5:
@@ -221,13 +221,13 @@ class DeviceCommunicator(QObject):
                     self.DO_task_PrepareRaspberry.set_line(0)
                     print("\033[91mError, impossible to prepare raspberry to record, check codesys invalid license error. Resetting Codesys, please wait... \033[0m")
                     self.raspberry.reset_codesys()
-                    self.start_adquisition(iteration = iteration + 1)
+                    self.start_acquisition(iteration = iteration + 1)
                     return
                 else:
                     self.DO_task_PrepareRaspberry.set_line(0)
                     print("\033[91mError, EtherCAT bus is not working, resetting Codesys, please wait...\033[0m")
                     self.raspberry.reset_codesys()
-                    self.start_adquisition()
+                    self.start_acquisition()
                     return
 
             if loop_counter >= 10000:
@@ -244,10 +244,10 @@ class DeviceCommunicator(QObject):
             self.DO_task_RelayCode.set_lines(self.mainWindow.DAQ_CODE)
 
         self.DO_task_LinMotTrigger.set_line(1)
-        self.mainWindow.start_adquisition_success_signal.emit()
+        self.mainWindow.start_acquisition_return_signal.emit()
 
     @pyqtSlot()
-    def stop_adquisition(self):
+    def stop_acquisition(self):
 
         self.mainWindow.moveLinMot[0] = False
 
@@ -289,14 +289,14 @@ class DeviceCommunicator(QObject):
                 print("Waiting LinMot to return to origin position")
                 time.sleep(5)
 
-        self.mainWindow.stop_adquisition_success_signal.emit()
+        self.mainWindow.stop_acquisition_return_signal.emit()
 
 # ---------------- INTERFACE AND PLOT  ----------------
-class AdquisitionProgram(QWidget):
+class AcquisitionProgram(QWidget):
     
-    trigger_adquisition_signal = pyqtSignal()
-    start_adquisition_success_signal = pyqtSignal()
-    stop_adquisition_success_signal = pyqtSignal()
+    trigger_acquisition_signal = pyqtSignal()
+    start_acquisition_return_signal = pyqtSignal()
+    stop_acquisition_return_signal = pyqtSignal()
     update_button_signal = pyqtSignal()
     
     def __init__(self, 
@@ -398,9 +398,9 @@ class AdquisitionProgram(QWidget):
         else:
             self.rload_id = None
 
-        # Adquisition control button:
+        # Acquisition control button:
         self.button = QPushButton("START LinMot")
-        self.button.clicked.connect(self.trigger_adquisition)
+        self.button.clicked.connect(self.trigger_acquisition)
         
         # Timer UI elements
         self.timer_label = QLabel("Duration (s):")
@@ -456,14 +456,14 @@ class AdquisitionProgram(QWidget):
         self.timer.start(self.refresh_rate)
 
         # Signal management
-        self.trigger_adquisition_signal.connect(self.trigger_adquisition)
-        self.start_adquisition_success_signal.connect(self.start_adquisition_success)
-        self.stop_adquisition_success_signal.connect(self.stop_adquisition_success)
+        self.trigger_acquisition_signal.connect(self.trigger_acquisition)
+        self.start_acquisition_return_signal.connect(self.start_acquisition_return)
+        self.stop_acquisition_return_signal.connect(self.stop_acquisition_return)
         self.update_button_signal.connect(self.update_button)
 
         if self.automatic_mode:
-            print("Starting adquisition in automatic mode.")
-            self.trigger_adquisition()
+            print("Starting acquisition in automatic mode.")
+            self.trigger_acquisition()
 
     def update_countdown(self):
         if self.remaining_seconds > 0 and self.moveLinMot[0]:
@@ -473,7 +473,7 @@ class AdquisitionProgram(QWidget):
             self.measurement_timer.stop()
             self.countdown_display.setText("Remaining time: -")
             self.should_save_data = True
-            self.trigger_adquisition()
+            self.trigger_acquisition()
     
     def update_plot(self):
         display_data = np.concatenate((
@@ -483,7 +483,7 @@ class AdquisitionProgram(QWidget):
         self.curve.setData(display_data)
 
     @pyqtSlot()
-    def start_adquisition_success(self):
+    def start_acquisition_return(self):
         os.makedirs(os.path.join(self.exp_dir, "RawData"), exist_ok=True)
         self.processor.local_path = os.path.join(self.exp_dir, "RawData", self.exp_id)
         os.makedirs(self.processor.local_path, exist_ok=True)
@@ -496,10 +496,10 @@ class AdquisitionProgram(QWidget):
         self.should_save_data = False
 
         self.update_button()
-        print("The adquisition has started successfully!")
+        print("The acquisition has started successfully!")
 
     @pyqtSlot()
-    def stop_adquisition_success(self):
+    def stop_acquisition_return(self):
         if self.should_save_data:
             
             self.daq_file = Pickle_merge(folder_path=self.processor.local_path, exp_id=self.exp_id)
@@ -521,7 +521,7 @@ class AdquisitionProgram(QWidget):
 
         if self.automatic_mode:
             if self.iteration_index <= self.iterations:
-                self.trigger_adquisition()
+                self.trigger_acquisition()
             else:
                 print("All iterations finished, exiting.")
                 self.close()
@@ -532,10 +532,10 @@ class AdquisitionProgram(QWidget):
         self.button.setText("STOP LinMot" if self.moveLinMot[0] else "START LinMot")
 
     @pyqtSlot()
-    def trigger_adquisition(self):
+    def trigger_acquisition(self):
 
         if self.sender() == self.button and self.automatic_mode:
-            print("Automatic mode has been disabled, stopping adquisition.")
+            print("Automatic mode has been disabled, stopping acquisition.")
             self.automatic_mode = False
 
         if self.automatic_mode:
@@ -545,7 +545,7 @@ class AdquisitionProgram(QWidget):
             # STOP ADQUISITION
             self.measurement_timer.stop()
             self.countdown_display.setText("Remaining time: -")
-            self.dev_comunicator.stop_adquisition_signal.emit()
+            self.dev_comunicator.stop_acquisition_signal.emit()
         else:
             # START ADQUISITION
             if not self.rload_id and not self.automatic_mode:
@@ -560,7 +560,7 @@ class AdquisitionProgram(QWidget):
             self.date_now = datetime.now().strftime("%d%m%Y_%H%M%S")
             self.exp_id = f"{self.date_now}-{self.tribu_id}-{self.rload_id}"
 
-            self.dev_comunicator.start_adquisition_signal.emit()
+            self.dev_comunicator.start_acquisition_signal.emit()
 
     def add_experiment_row(self):
         """Add a new row to ExpsDescription.xlsx with the experiment data if it doesn't already exist."""
@@ -743,7 +743,7 @@ if __name__ == '__main__':
                       'RLOAD_ID': 'Resistance 6'}]
 
     app = QApplication(sys.argv)
-    window = AdquisitionProgram(CHANNELS, automatic_mode=True, RESISTANCE_DATA=resistance_list)
+    window = AcquisitionProgram(CHANNELS, automatic_mode=True, RESISTANCE_DATA=resistance_list)
     window.show()
     sys.exit(app.exec_())
 

@@ -112,7 +112,7 @@ class DAQTask(Task):
         return 0
 
 # ---------------- INTERFACE AND PLOT  ----------------
-class AdquisitionProgram(QWidget):
+class AcquisitionProgram(QWidget):
     
     thread_signal_manager = pyqtSignal(object)
     
@@ -194,7 +194,7 @@ class AdquisitionProgram(QWidget):
                                             port=self.rb_port,
                                             username=self.rb_username, 
                                             password=self.rb_password, 
-                                            AdquisitionProgramReference=self)
+                                            AcquisitionProgramReference=self)
         self.thread_raspberry = QThread()
         self.raspberry.moveToThread(self.thread_raspberry)
         self.thread_raspberry.start()
@@ -528,7 +528,7 @@ if __name__ == '__main__':
     }
     app = QApplication(sys.argv)
     # Afegir passar les R i els codis de la DAQ i fer el loop
-    window = AdquisitionProgram(CHANNELS, automatic_mode=True)
+    window = AcquisitionProgram(CHANNELS, automatic_mode=True)
     window.show()
     sys.exit(app.exec_())
 
