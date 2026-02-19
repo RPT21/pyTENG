@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import tkinter as tk
 from tkinter import filedialog
+from MyMerger import merge_DAQ_data
 
 
 # %% --------------------------------------------------------------------------
@@ -152,25 +153,23 @@ def LoadMotorFile(MotorFile):
 # LOAD DAQ RAWDATA
 # -----------------------------------------------------------------------------
 
-def LoadDAQFile(DaqFile):
+def LoadDAQData(folder_path):
     '''
     Loads and processes a DAQ pickle file.
     
     Parameters
     ----------
-    DaqFile : str
-        Path to the data file.
+    folder_path : str
+        Path to the folder with DAQ data
     
     Returns
     -------
     pd.DataFrame or None
         Processed DAQ data or None if there is an error.
     '''
-    try:
-        dfDaq = pd.read_pickle(DaqFile)
-    except Exception as e:
-        logger0.error(f'Error reading DAQ file {DaqFile}: {e}.')
-        return None
+
+    # Read the DAQ Data
+    dfDaq = merge_DAQ_data(folder_path)
     
     # Drop non-defined columns:
     dropcols = [col for col in dfDaq.columns if col not in DaqColumnsRenames]
@@ -280,7 +279,7 @@ def LoadFiles(MotorFile, DaqFile):
         return None, None
     
     # Load DAQ File
-    dfDaq = LoadDAQFile(DaqFile)
+    dfDaq = LoadDAQData(DaqFile)
     if dfDaq is None:
         return None, None
     
@@ -301,25 +300,28 @@ def LoadFiles(MotorFile, DaqFile):
     
     Cycles = []
     for idx in range(nCycles):
-        # Obtain data from each cycle
+
+        # Obtain data from the idx cycle interval (we are iterating for each cycle interval)
         dfcyM = dfMot.iloc[MotCycles[idx][0] : MotCycles[idx][1] + 1].reset_index(drop=True)
         dfcyD = dfDaq.iloc[DaqCycles[idx][0] : DaqCycles[idx][1] + 1].reset_index(drop=True)
         
-        # Find the first index where State == 1
+        # Find the first index where (State == 1) in the cycle interval for the Motor
         mask = dfcyM['State'].eq(1)
         if mask.any():
             i = mask.idxmax()
         else:
             # Incomplete cycle
             continue
-        
+
+        # Find the first index where (State == 1) in the cycle interval for the DAQ
         mask = dfcyD['State'].eq(1)
         if mask.any():
             j = mask.idxmax()
         else:
             # Incomplete cycle
             continue
-        
+
+        # Interpolate the data columns using DAQ sampling rate as the reference
         for col in dfcyM.columns:
             if col == 'Time' or col == 'State':
                 continue
@@ -365,7 +367,7 @@ if __name__ == '__main__':
     root.attributes('-topmost', True)
     MotorFile = filedialog.askopenfilename(title="Select Motor CSV File")
     if MotorFile:
-        DaqFile = filedialog.askopenfilename(title="Select Daq Pickle File")
+        DaqFile = filedialog.askdirectory(title="Select DAQ Data Folder")
     
     if MotorFile and DaqFile:
         MotorFile, DaqFile = os.path.normpath(MotorFile), os.path.normpath(DaqFile)

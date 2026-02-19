@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 from collections import defaultdict
 import warnings
 
@@ -150,7 +151,166 @@ def Pickle_merge(folder_path, exp_id, groupby=None):
 
         return filename
 
-        
+def validate_binary_column(df, column):
+    # Check that all te values are {0, 1}
+    if not df[column].isin([0, 1]).all():
+        # Identify which are the values that are not 0 or 1
+        wrong_values = df[~df[column].isin([0, 1])][column].unique()
+        raise ValueError(f"Error: The column '{column}' contains not binary values: {wrong_values}")
+
+
+def synchronize_dataframes(dataframes_list, time_col='Time (s)'):
+    """
+    Synchronizes a list of DataFrames to the highest sampling rate found among them.
+    It does a temporal boundary alignment as well (make all data have the same physical duration).
+
+    Args:
+        dataframes_list (list): List of Pandas DataFrames.
+        time_col (str): The name of the time column (must be present in all DFs).
+
+    Returns:
+        Pandas Dataframe: Returns the merged dataframe
+    """
+
+    if not dataframes_list:
+        return []
+
+    # =================================================================
+    # STEP 0: Temporal Boundary Alignment: all data represent the same physical duration of the experiment
+    # =================================================================
+
+    # Check that timestamps are correct:
+    for df in dataframes_list:
+        if not (df[time_col].is_monotonic_increasing and df[time_col].is_unique):
+            raise ValueError("The time column must be strictly increasing for interpolation.")
+
+    # Find the elapsed time for each dataframe and select the smallest one
+    print("Analysing time duration...")
+    min_end_time = float('inf')
+    for i, df in enumerate(dataframes_list):
+        current_time = df[time_col].iloc[-1]
+        print(f"  - DataFrame {i}: Time duration = {current_time:.6f} s")
+        if current_time < min_end_time:
+            min_end_time = current_time
+    print(f"The experiment ended at time: {min_end_time:.4f} seconds.")
+
+    # Filter the dataframes to make them have the same time duration
+    for i in range(len(dataframes_list)):
+        # Filter the dataframes to the min_end_time timestamp (ignore old index [drop=True] and create a new one)
+        dataframes_list[i] =\
+            dataframes_list[i][dataframes_list[i][time_col] <= min_end_time].copy().reset_index(drop=True)
+    print("All dataframes now have the same time duration")
+
+    # =================================================================
+    # STEP 1: Find the Highest Sampling Rate DataFrame
+    # =================================================================
+    min_time_step = float('inf')
+    master_time_index = None
+
+    print("Analyzing sampling rates...")
+
+    for i, df in enumerate(dataframes_list):
+
+        current_step = df[time_col].diff().mean()
+        print(f"  - DataFrame {i}: Average timestep = {current_step:.6f} s")
+
+        if current_step < min_time_step:
+            # Save the timestamp of the highest sampling rate DataFrame
+            master_time_index = df[time_col].values
+            min_time_step = current_step
+
+    print(f"Target sampling step: {min_time_step:.6f} s")
+
+    # =================================================================
+    # STEP 2: Resample and Interpolate all DataFrames
+    # =================================================================
+    binary_cols = ["LinMot_Enable", "LinMot_Up_Down"]
+    synced_dataframes = []
+
+    for df in dataframes_list:
+
+        # 1. Prepare the DF: remove duplicates and set the time column as the index
+        df_temp = df.drop_duplicates(subset=[time_col]).set_index(time_col)
+
+        # 2. Reindex and Interpolate
+        # - union(): Merges the dataframe's timestamp with the higher sampling rate timestamp
+        # - interpolate(method='index'): Uses the actual time values to calculate data in the new timesteps
+        # - loc[master_time_index]: Keeps only the points belonging to the master timestamp
+        df_sync = (
+            df_temp
+            .reindex(df_temp.index.union(master_time_index))
+            .interpolate(method='index')
+            .loc[master_time_index]
+        )
+
+        synced_dataframes.append(df_sync)
+
+    # 3. Concatenate directly (since all DFs share the same master time index)
+    df_final = pd.concat(synced_dataframes, axis=1)
+
+    # 4. Clean binary columns all at once (Vectorization)
+    # Find which binary columns actually exist in the final merged dataframe
+    found_binary_columns = [col for col in binary_cols if col in df_final.columns]
+    if found_binary_columns:
+        # Apply rounding and cast to integer for all matching columns simultaneously
+        df_final[found_binary_columns] = df_final[found_binary_columns].round().astype(int)
+
+    # 5. Restore the time index as a standard column
+    df_final.index.name = time_col
+    return df_final.reset_index()
+
+def merge_DAQ_data(folder_path):
+    files = [f for f in os.listdir(folder_path) if f.endswith('.pkl')]
+
+    dataframes = []
+
+    for file in files:
+        try:
+            df = pd.read_pickle(os.path.join(folder_path, file))
+            dataframes.append(df)
+        except Exception as e:
+            print(f'Error reading DAQ file {file}: {e}.')
+            return
+
+    # Merge all dataframes with different sampling rates and different elapsed time to one dataframe
+    df = synchronize_dataframes(dataframes, time_col='Time (s)')
+
+    # Check synchronization columns:
+    if not ("LinMot_Enable" in df.columns and "LinMot_Up_Down" in df.columns):
+        print("Error, LinMot_Up_Down and LinMot_Enable are not present in the dataframes")
+        return
+
+    # Validate that they have valid data
+    for col in df.columns:
+        if col in ["LinMot_Enable", "LinMot_Up_Down"]:
+            validate_binary_column(df, col)
+
+    # Calculate the differences between adjacent values
+    diff = df["LinMot_Enable"].diff()
+
+    # Search indices
+    up_index = diff.index[diff == 1].tolist()
+    down_index = diff.index[diff == -1].tolist()
+
+    if len(up_index) != 1 and len(down_index) != 1:
+        print("Error, LinMot_Enable data is corrupted")
+        return
+    else:
+        up_index = up_index[0] - 1
+        down_index = down_index[0]
+
+    print("Found rising edge and falling edge positions in LinMot_Enable")
+    print(f"Rising edge (from 0 to 1): {up_index}")
+    print(f"Falling edge (from 1 to 0): {down_index}")
+
+    # Filter dataframes using the calculated indices
+    df_final = df.loc[up_index : down_index].reset_index(drop=True)
+    return df_final
+
+if __name__ == "__main__":
+    df_final = merge_DAQ_data(r"C:\Users\rpieres\Desktop\RogerTest\RawData\RawData")
+    print("DONE")
+
         
         
         
