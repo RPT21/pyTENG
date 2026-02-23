@@ -1,12 +1,14 @@
 import os
 import re
 import logging
+from enum import nonmember
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import tkinter as tk
 from tkinter import filedialog
-from MyMerger import merge_DAQ_data
+from MyMerger import merge_DAQ_data, synchronize_dataframes
 
 
 # %% --------------------------------------------------------------------------
@@ -73,8 +75,6 @@ MotColumnsRenames = {
 DaqColumnsRenames = {
     'Time (s)': 'Time',
     'Voltage': 'Voltage',
-    # 'Signal': 'Voltage',
-    'Current': 'Current',
     'LinMot_Enable': 'Bool1',
     'LinMot_Up_Down': 'Bool2'
 }
@@ -138,14 +138,6 @@ def LoadMotorFile(MotorFile):
     dfMot['Force'] = - dfMot['Force']
     dfMot['TargetForce'] = - dfMot['TargetForce']
     
-    # Estimate Velocity and Acceleration
-    dfMot['Velocity'] = (dfMot['Position'].diff()/1000) / dfMot['Time'].diff()
-    dfMot['Acceleration'] = dfMot['Velocity'].diff() / dfMot['Time'].diff()
-    
-    # Create State variable
-    dfMot['State'] = dfMot['Bool1'] + dfMot['Bool2']
-    dfMot = dfMot.drop(columns=['Bool1', 'Bool2'])
-    
     return dfMot
 
 
@@ -178,13 +170,8 @@ def LoadDAQData(folder_path):
     # Check if all defined columns exist
     for col in DaqColumnsRenames.keys():
         if col not in dfDaq.columns:
-            if col == 'Current':
-                dfDaq.insert(2, 'Current', None)
-                dfDaq['Current'] = np.zeros(len(dfDaq), dtype=float)
-                logger0.warning(f'Column Current not found in {DaqFile}. Filled with zeros.')
-            else:
-                logger0.error(f'Column {col} not found in {DaqFile}.')
-                return None
+            logger0.error(f'Column {col} not found in {DaqFile}.')
+            return
     
     # Rename defined columns
     dfDaq = dfDaq.rename(columns=DaqColumnsRenames)
@@ -193,25 +180,13 @@ def LoadDAQData(folder_path):
     dfDaq = dfDaq.astype({
         'Time': float,
         'Voltage': float,
-        'Current': float,
         'Bool1': int,
         'Bool2': int
     })
-    
-    # Corrections Time
-    dfDaq['Time'] -= dfDaq['Time'].iloc[0]
-
-    # The logical 0 has a voltage of 0 V, and the logical 1 has a voltage of 3.3 V, so the equivalent int is 3
-    dfDaq['Bool1'] = dfDaq['Bool1'].replace(3, 1)
-    dfDaq['Bool2'] = dfDaq['Bool2'].replace(3, 1)
 
     # Corrections Voltage (find the starting point of motor movement and reference voltage from this point)
     j = dfDaq['Bool1'].eq(1).idxmax()
     dfDaq['Voltage'] -= dfDaq['Voltage'][:j].mean()
-    
-    # Create State variable
-    dfDaq['State'] = dfDaq['Bool1'] + dfDaq['Bool2']
-    dfDaq = dfDaq.drop(columns=['Bool1', 'Bool2'])
     
     return dfDaq
 
@@ -220,20 +195,21 @@ def LoadDAQData(folder_path):
 # FIND CYCLES FUNCTION
 # -----------------------------------------------------------------------------
 
-def FindCycles(state_series):
+def FindCycles(df):
     '''
     Identifies start and end indices of operational cycles based on state changes.
     
     Parameters
     ----------
-    state_series : pd.Series
-        Series of state values.
+    dataframe : Pandas DataFrame
+        Dataframe with two binary synchronization columns (Enable/Disable, Move_Up/Move_Down)
     
     Returns
     -------
     list of [start, end]
         List of cycles represented by their star and end indices.
     '''
+    state_series = df['Bool1'] + df['Bool2']
     cycles = []
     prev_state = state_series.iloc[0]
     start = None
@@ -290,10 +266,58 @@ def LoadFiles(MotorFile, DaqFile):
     # DAQ sampling rate
     DaqFs = 1 / dfDaq['Time'].diff().mean()
     logger0.info(f'DAQ sampling rate: {DaqFs}.')
+
+    ### Synchronize motor and DAQ data ###
+
+    # Calculate the differences between adjacent values
+    diff = dfMot['Bool1'].diff()
+
+    # Search indices
+    up_index = diff.index[diff == 1].tolist()
+    down_index = diff.index[diff == -1].tolist()
+
+    if len(up_index) != 1 and len(down_index) != 1:
+        raise Exception("Error, LinMot_Enable start and end position not found")
+    else:
+        up_index = up_index[0] - 1
+        down_index = down_index[0]
+
+    print("Found rising edge and falling edge positions in LinMot_Enable")
+    print(f"Rising edge (from 0 to 1): {up_index}")
+    print(f"Falling edge (from 1 to 0): {down_index}")
+
+    # Filter Motor dataframe using the calculated indices and reset time reference
+    dfMot = dfMot.loc[up_index : down_index].copy().reset_index(drop=True)
+    dfMot['Time'] -= dfMot['Time'].iloc[0]
+
+    # Adjust the motor timestamp
+    dfMot_time = dfMot['Time'].iloc[-1] - dfMot['Time'].iloc[0]
+    dfDaq_time = dfDaq['Time'].iloc[-1] - dfDaq['Time'].iloc[0]
+    print("Adjusting DAQ and Motor timestamps")
+    print("Motor time: ", dfMot_time)
+    print("DAQ time: ", dfDaq_time)
+    print("Difference: ", abs(dfMot_time - dfDaq_time), "seconds")
+    dfMot['Time'] = dfMot['Time'] * (dfDaq_time / dfMot_time)
+
+
+    # Synchronize dataframes
+    [dfDaq, dfMot] = synchronize_dataframes([dfDaq, dfMot],
+                                            time_col='Time',
+                                            filter_time=False,
+                                            binary_cols=['Bool1', 'Bool2'])
+
+    # Restore the time index as a standard column
+    for df in [dfMot, dfDaq]:
+        df.index.name = 'Time'
+        df.reset_index(inplace=True)
+
+    # Estimate Velocity and Acceleration
+    dfMot['Velocity'] = (dfMot['Position'].diff()/1000) / dfMot['Time'].diff()
+    dfMot['Acceleration'] = dfMot['Velocity'].diff() / dfMot['Time'].diff()
                     
     # Finding cycles
-    MotCycles = FindCycles(dfMot['State'])
-    DaqCycles = FindCycles(dfDaq['State'])
+    MotCycles = FindCycles(dfMot)
+    DaqCycles = FindCycles(dfDaq)
     if len(MotCycles) != len(DaqCycles):
         logger0.info(f'Different number of cycles: Motor={len(MotCycles)}, DAQ={len(DaqCycles)}. Using minimum.')
     nCycles = min(len(MotCycles), len(DaqCycles))
@@ -304,9 +328,9 @@ def LoadFiles(MotorFile, DaqFile):
         # Obtain data from the idx cycle interval (we are iterating for each cycle interval)
         dfcyM = dfMot.iloc[MotCycles[idx][0] : MotCycles[idx][1] + 1].reset_index(drop=True)
         dfcyD = dfDaq.iloc[DaqCycles[idx][0] : DaqCycles[idx][1] + 1].reset_index(drop=True)
-        
+
         # Find the first index where (State == 1) in the cycle interval for the Motor
-        mask = dfcyM['State'].eq(1)
+        mask = dfcyM['Bool2'].eq(1)
         if mask.any():
             i = mask.idxmax()
         else:
@@ -314,7 +338,7 @@ def LoadFiles(MotorFile, DaqFile):
             continue
 
         # Find the first index where (State == 1) in the cycle interval for the DAQ
-        mask = dfcyD['State'].eq(1)
+        mask = dfcyD['Bool2'].eq(1)
         if mask.any():
             j = mask.idxmax()
         else:
@@ -325,24 +349,25 @@ def LoadFiles(MotorFile, DaqFile):
         for col in dfcyM.columns:
             if col == 'Time' or col == 'State':
                 continue
-            
+
+            # Create in the DAQ a new column to store the motor data
             dfcyD[col] = np.zeros(len(dfcyD), dtype=float)
-            
+
             # Down-phase interpolation
             valid_mask_down = dfcyM[col].iloc[:i].notna()
             xp = dfcyM['Time'].iloc[:i][valid_mask_down].values
             fp = dfcyM[col].iloc[:i][valid_mask_down].values
             x = dfcyD['Time'].iloc[:j].values
-            
+
             if np.all(np.diff(xp) > 0) and len(xp) > 1:
                 dfcyD.loc[dfcyD.index[:j], col] = np.interp(x, xp, fp)
-            
+
             # Up-phase interpolation
             valid_mask_up = dfcyM[col].iloc[i:].notna()
             xp = dfcyM['Time'].iloc[i:][valid_mask_up].values
             fp = dfcyM[col].iloc[i:][valid_mask_up].values
             x = dfcyD['Time'].iloc[j:].values
-            
+
             if np.all(np.diff(xp) > 0) and len(xp) > 1:
                 dfcyD.loc[dfcyD.index[j:], col] = np.interp(x, xp, fp)
         
@@ -360,14 +385,19 @@ def LoadFiles(MotorFile, DaqFile):
 # -----------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    logger0.req('Please select the data files to load.')
-    root = tk.Tk()
-    root.withdraw()
-    root.lift()
-    root.attributes('-topmost', True)
-    MotorFile = filedialog.askopenfilename(title="Select Motor CSV File")
-    if MotorFile:
-        DaqFile = filedialog.askdirectory(title="Select DAQ Data Folder")
+    debug = True
+    if debug:
+        MotorFile = r"C:\Users\rpieres\Desktop\RogerTest\RawData\RawData\Motor-11022026_125956-C-Resistance 0.csv"
+        DaqFile = r"C:\Users\rpieres\Desktop\RogerTest\RawData\RawData"
+    else:
+        logger0.req('Please select the data files to load.')
+        root = tk.Tk()
+        root.withdraw()
+        root.lift()
+        root.attributes('-topmost', True)
+        MotorFile = filedialog.askopenfilename(title="Select Motor CSV File")
+        if MotorFile:
+            DaqFile = filedialog.askdirectory(title="Select DAQ Data Folder")
     
     if MotorFile and DaqFile:
         MotorFile, DaqFile = os.path.normpath(MotorFile), os.path.normpath(DaqFile)
