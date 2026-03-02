@@ -98,6 +98,11 @@ class AcquisitionProgram(QWidget):
         self.actual_plotter = None
         self.local_path = [""]
 
+        # Introduce the indexes of the channels:
+        for device in CHANNELS:
+            for idx, (name, config) in enumerate(device["DAQ_CHANNELS"].items()):
+                device["DAQ_CHANNELS"][name] = [config, idx]
+
         # Check RESISTANCE_DATA when automatic_mode enabled
         if self.automatic_mode:
             if self.RESISTANCE_DATA is None:
@@ -534,12 +539,11 @@ if __name__ == '__main__':
     # The order of definition is the order of saving into buffer so we need to put the order in the list
     CHANNELS = [
         {
-            "NAME":"Dev1",
+            "NAME": "Dev1",
 
             "DAQ_CHANNELS":{
-                # "Voltage": [{"port":"Dev1/ai2", "port_config":DAQmx_Val_Diff}, 0],
-                "Voltage": [{"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff}, 0],
-                # "Current": [{"port":"Dev1/ai3", "port_config":DAQmx_Val_RSE}, 1],
+                "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff},
+                # "Current": {"port": "Dev1/ai3", "port_config": DAQmx_Val_RSE},
             },
 
             # "TRIGGER_SOURCE": "PFI0",
@@ -549,13 +553,13 @@ if __name__ == '__main__':
         },
 
         {
-            "NAME":"Dev2",
+            "NAME": "Dev2",
 
             "DAQ_CHANNELS":{
-                # "LinMot_Enable": [{"port":"Dev2/ai0", "port_config":DAQmx_Val_RSE}, 0],
-                # "LinMot_Up_Down": [{"port":"Dev2/ai1", "port_config":DAQmx_Val_RSE}, 1]
-                "LinMot_Enable": [{"port":"Dev2/port0/line0", "port_config":None}, 0],
-                "LinMot_Up_Down": [{"port":"Dev2/port0/line1", "port_config":None}, 1]
+                # "LinMot_Enable": {"port":"Dev2/ai0", "port_config":DAQmx_Val_RSE},
+                # "LinMot_Up_Down": {"port":"Dev2/ai1", "port_config":DAQmx_Val_RSE}
+                "LinMot_Enable": {"port":"Dev2/port0/line0", "port_config":None},
+                "LinMot_Up_Down": {"port":"Dev2/port0/line1", "port_config":None}
             },
 
             # "TRIGGER_SOURCE": "PFI0",

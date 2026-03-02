@@ -114,30 +114,35 @@ class MainWindow(QWidget):
 
         # The order of definition is the order of saving into buffer so we need to put the order in the list
         self.CHANNELS = [
-        {
-            "NAME":"Dev1",
+            {
+                "NAME": "Dev1",
 
-            "DAQ_CHANNELS":{
-                "Voltage": [{"port":"Dev1/ai2", "port_config":DAQmx_Val_Diff}, 0],
-                "Current": [{"port":"Dev1/ai3", "port_config":DAQmx_Val_RSE}, 1],
+                "DAQ_CHANNELS":{
+                    "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff},
+                    # "Current": {"port": "Dev1/ai3", "port_config": DAQmx_Val_RSE},
+                },
+
+                # "TRIGGER_SOURCE": "PFI0",
+                "TRIGGER_SOURCE": None,
+
+                "TYPE": "analog"
             },
 
-            "TRIGGER_SOURCE":"PFI0"
-            # "TRIGGER_SOURCE":None
-        },
+            {
+                "NAME": "Dev2",
 
-        {
-            "NAME":"Dev2",
+                "DAQ_CHANNELS":{
+                    # "LinMot_Enable": {"port":"Dev2/ai0", "port_config":DAQmx_Val_RSE},
+                    # "LinMot_Up_Down": {"port":"Dev2/ai1", "port_config":DAQmx_Val_RSE}
+                    "LinMot_Enable": {"port":"Dev2/port0/line0", "port_config":None},
+                    "LinMot_Up_Down": {"port":"Dev2/port0/line1", "port_config":None}
+                },
 
-            "DAQ_CHANNELS":{
-                "LinMot_Enable": [{"port":"Dev2/ai0", "port_config":DAQmx_Val_RSE}, 0],
-                "LinMot_Up_Down": [{"port":"Dev2/ai1", "port_config":DAQmx_Val_RSE}, 1]
-            },
-
-            "TRIGGER_SOURCE":"PFI0"
-            # "TRIGGER_SOURCE":None
-        }
-    ]
+                # "TRIGGER_SOURCE": "PFI0",
+                "TRIGGER_SOURCE": None,
+                "TYPE": "digital"
+            }
+        ]
 
         self.AcquisitionProgram = None
         self.mainWindowButtons = {"btnAcq":self.btnAcq,
