@@ -98,7 +98,7 @@ class AcquisitionProgram(QWidget):
         self.actual_plotter = None
         self.local_path = [""]
 
-        # Introduce the indexes of the channels:
+        # The order of definition is the order of saving into buffer, so we introduce an index to know the position:
         for device in CHANNELS:
             for idx, (name, config) in enumerate(device["DAQ_CHANNELS"].items()):
                 device["DAQ_CHANNELS"][name] = [config, idx]
@@ -536,7 +536,6 @@ class AcquisitionProgram(QWidget):
 # ---------------- MAIN ----------------
 if __name__ == '__main__':
 
-    # The order of definition is the order of saving into buffer so we need to put the order in the list
     CHANNELS = [
         {
             "NAME": "Dev1",
