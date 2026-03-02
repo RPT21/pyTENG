@@ -64,7 +64,7 @@ def select_paths():
     root.attributes("-topmost", True)
     
     # Ask for experiments directory
-    logger1.req("Please provide the experimets directory location.")
+    logger1.req("Please provide the experiments directory location.")
     exps_dir = filedialog.askdirectory(title="Select Experiments Directory")
     if exps_dir:
         exps_dir = os.path.normpath(exps_dir)
@@ -86,16 +86,16 @@ def select_paths():
     datasets_dir = os.path.join(exps_dir, "DataSets")
     os.makedirs(datasets_dir, exist_ok=True)
     
-    # Define ExpsDescription file 
-    exps_file = os.path.join(exps_dir, "ExpsDescription.xlsx")
+    # Define Experiments file
+    exps_file = os.path.join(rawdata_dir, "Experiments.ods")
     if not os.path.isfile(exps_file):
-        logger1.error("Could not find ExpsDescription.xlsx file in experiments directory.")
+        logger1.error("Could not find Experiments.ods file in experiments directory.")
         return None, None, None
     
     # Define LoadsDescription file
-    loads_file = os.path.join(exps_dir, "LoadsDescription.xlsx")
+    loads_file = os.path.join(rawdata_dir, "LoadsDescription.ods")
     if not os.path.isfile(loads_file):
-        logger1.error("Could not find LoadsDescription.xlsx file in experiments directory.")
+        logger1.error("Could not find LoadsDescription.ods file in experiments directory.")
         return None, None, None
     
     # Load ExpsDescription and LoadDescription files

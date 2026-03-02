@@ -1,6 +1,7 @@
 pandas
 pandas-stubs
 openpyxl
+odfpy
 PyQt5
 pyqtgraph
 QtPy
