@@ -37,10 +37,11 @@ class BufferProcessor(QObject):
             # unnecessary memory copies for maximum performance. (It does not use the file_handle.write() method)
             data.tofile(self.file_handle)
         except Exception as e:
-            print("Error saving data: ", e)
-            self.mainWindow.automatic_mode = False
-            self.mainWindow.error_flag = True
-            self.mainWindow.trigger_acquisition_signal.emit()
+            if not self.mainWindow.error_flag:
+                print("Error saving data: ", e)
+                self.mainWindow.automatic_mode = False
+                self.mainWindow.error_flag = True
+                self.mainWindow.trigger_acquisition_signal.emit()
         else:
             logging.info(f"{self.task_name}_{self.task_type} -> [+] Saved {len(data)} samples")
 

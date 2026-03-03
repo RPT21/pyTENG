@@ -267,10 +267,11 @@ class AcquisitionProgram(QWidget):
             status_bit_1 = self.dev_comunicator.DI_task_Raspberry_status_1.read_line()
 
             if not (status_bit_0 == 1 and status_bit_1 == 0):
-                # An error has occurred during the data acquisition
-                print(f"\033[91mError, during the acquisition, the Raspberry sent an error code:\033[0m", f"{status_bit_0}{status_bit_1}")
-                self.error_flag = True
-                self.trigger_acquisition()
+                if not self.error_flag:
+                    # An error has occurred during the data acquisition
+                    print(f"\033[91mError, during the acquisition, the Raspberry sent an error code:\033[0m", f"{status_bit_0}{status_bit_1}")
+                    self.error_flag = True
+                    self.trigger_acquisition()
             
         if not self.error_flag:
             if self.remaining_seconds > 0 and self.moveLinMot[0]:

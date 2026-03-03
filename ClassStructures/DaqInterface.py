@@ -102,19 +102,21 @@ class AnalogRead(DAQTaskBase):
                         self.index = 0
                         self.processor_signal.emit(full_buffer)
                     else:
-                        self.mainWindow.automatic_mode = False
-                        self.mainWindow.error_flag = True
-                        self.mainWindow.trigger_acquisition_signal.emit()
-                        print("\033[91mFatal error thread race condition reached when saving into disk!\033[0m")
+                        if not self.mainWindow.error_flag:
+                            self.mainWindow.automatic_mode = False
+                            self.mainWindow.error_flag = True
+                            self.mainWindow.trigger_acquisition_signal.emit()
+                            print("\033[91mFatal error thread race condition reached when saving into disk!\033[0m")
             else:
                 self.StopTask()
 
         except Exception as e:
-            print(f"DAQ error in callback: {e}")
-            self.mainWindow.automatic_mode = False
-            self.mainWindow.error_flag = True
-            self.mainWindow.trigger_acquisition_signal.emit()
-            print("\033[91mAcquisition has stopped due to a DAQ acquisition error\033[0m")
+            if not self.mainWindow.error_flag:
+                print(f"DAQ error in callback: {e}")
+                self.mainWindow.automatic_mode = False
+                self.mainWindow.error_flag = True
+                self.mainWindow.trigger_acquisition_signal.emit()
+                print("\033[91mAcquisition has stopped due to a DAQ acquisition error\033[0m")
 
         return 0
 
@@ -193,19 +195,21 @@ class DigitalRead(DAQTaskBase):
                         self.index = 0
                         self.processor_signal.emit(full_buffer)
                     else:
-                        self.mainWindow.automatic_mode = False
-                        self.mainWindow.error_flag = True
-                        self.mainWindow.trigger_acquisition_signal.emit()
-                        print("\033[91mFatal error thread race condition reached when saving into disk!\033[0m")
+                        if not self.mainWindow.error_flag:
+                            self.mainWindow.automatic_mode = False
+                            self.mainWindow.error_flag = True
+                            self.mainWindow.trigger_acquisition_signal.emit()
+                            print("\033[91mFatal error thread race condition reached when saving into disk!\033[0m")
             else:
                 self.StopTask()
 
         except Exception as e:
-            print(f"DAQ error in callback: {e}")
-            self.mainWindow.automatic_mode = False
-            self.mainWindow.error_flag = True
-            self.mainWindow.trigger_acquisition_signal.emit()
-            print("\033[91mAcquisition has stopped due to a DAQ acquisition error\033[0m")
+            if not self.mainWindow.error_flag:
+                print(f"DAQ error in callback: {e}")
+                self.mainWindow.automatic_mode = False
+                self.mainWindow.error_flag = True
+                self.mainWindow.trigger_acquisition_signal.emit()
+                print("\033[91mAcquisition has stopped due to a DAQ acquisition error\033[0m")
 
         return 0
 

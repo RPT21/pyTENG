@@ -199,8 +199,9 @@ class DeviceCommunicator(QObject):
                 time.sleep(0.1)
 
             if loop_counter >= max_iter:
-                self.mainWindow.error_flag = True
-                print("\033[91mError loop counter overflow, Raspberry is not responding\033[0m")
+                if not self.mainWindow.error_flag:
+                    self.mainWindow.error_flag = True
+                    print("\033[91mError loop counter overflow, Raspberry is not responding\033[0m")
 
             # Wait time to let the DAQ measure LinMot_Enable = 0
             time.sleep(0.1)
