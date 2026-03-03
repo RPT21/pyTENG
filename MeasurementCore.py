@@ -384,14 +384,14 @@ class AcquisitionProgram(QWidget):
             self.dev_comunicator.stop_acquisition_signal.emit()
         else:
             # START ADQUISITION
-            if not self.rload_id and not self.automatic_mode:
+            if self.automatic_mode:
+                self.rload_id = self.RESISTANCE_DATA[self.iteration_index]["RLOAD_ID"]
+            elif not self.rload_id:
                 print("\nPlease enter RloadId")
                 self.rload_id, ok = QInputDialog.getText(self, "Input", "Enter RloadId:")
                 if not ok or not self.rload_id:
                     print("No RloadId entered. Operation canceled.")
                     return
-            else:
-                self.rload_id = self.RESISTANCE_DATA[self.iteration_index]["RLOAD_ID"]
 
             self.date_now = datetime.now().strftime("%d%m%Y_%H%M%S")
             self.exp_id = f"{self.date_now}-{self.tribu_id}-{self.rload_id}"
@@ -541,8 +541,8 @@ if __name__ == '__main__':
             "NAME": "Dev1",
 
             "DAQ_CHANNELS":{
-                "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff},
-                # "Current": {"port": "Dev1/ai3", "port_config": DAQmx_Val_RSE},
+                "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff, "conversion_factor": None},
+                # "Current": {"port": "Dev1/ai2", "port_config": DAQmx_Val_RSE, "conversion_factor": 1},
             },
 
             # "TRIGGER_SOURCE": "PFI0",
@@ -555,10 +555,10 @@ if __name__ == '__main__':
             "NAME": "Dev2",
 
             "DAQ_CHANNELS":{
-                # "LinMot_Enable": {"port":"Dev2/ai0", "port_config":DAQmx_Val_RSE},
-                # "LinMot_Up_Down": {"port":"Dev2/ai1", "port_config":DAQmx_Val_RSE}
-                "LinMot_Enable": {"port":"Dev2/port0/line0", "port_config":None},
-                "LinMot_Up_Down": {"port":"Dev2/port0/line1", "port_config":None}
+                # "LinMot_Enable": {"port":"Dev2/ai0", "port_config":DAQmx_Val_RSE, "conversion_factor": None},
+                # "LinMot_Up_Down": {"port":"Dev2/ai1", "port_config":DAQmx_Val_RSE, "conversion_factor": None}
+                "LinMot_Enable": {"port":"Dev2/port0/line0", "port_config":None, "conversion_factor": None},
+                "LinMot_Up_Down": {"port":"Dev2/port0/line1", "port_config":None, "conversion_factor": None}
             },
 
             # "TRIGGER_SOURCE": "PFI0",
@@ -584,10 +584,14 @@ if __name__ == '__main__':
 
     # To debug, use this
     debug = True
+    tribo_lab = True
     if debug:
-        exp_dir = r"C:\Users\rpieres\Desktop\Test"
-        tribu_id = "C"
-        rload_id = "Resistance 4"
+        if tribo_lab:
+            exp_dir = r"C:\Users\mmartic\Desktop\RogerTest"
+        else:
+            exp_dir = r"C:\Users\rpieres\Desktop\Test"
+        tribu_id = "PDMSvsNylon"
+        rload_id = "10"
     else:
         exp_dir = None
         tribu_id = None

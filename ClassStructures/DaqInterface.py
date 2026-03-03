@@ -39,6 +39,10 @@ class DAQTaskBase(Task):
         self.index = 0
         self.mainWindow = AcquisitionProgramReference
 
+        # Apply conversion factors only when at least one of the factors is not None
+        conv_factors = [ch[0]["conversion_factor"] for ch in CHANNELS.values()]
+        self.xApplyFactors = any(v is not None for v in conv_factors)
+
         if TRIGGER_SOURCE:
             self.CfgDigEdgeStartTrig(TRIGGER_SOURCE, DAQmx_Val_Rising)
 
@@ -59,6 +63,12 @@ class AnalogRead(DAQTaskBase):
         self.CfgSampClkTiming("", self.SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, self.SAMPLES_PER_CALLBACK)
         self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, self.SAMPLES_PER_CALLBACK, 0)
 
+        # Conversion factor vector:
+        self.conv_factors = np.array([
+            channel[0]["conversion_factor"] if channel[0]["conversion_factor"] is not None else 1
+            for channel in list(self.CHANNELS.values())
+        ], dtype=np.float64)
+
         # Determine buffer data type
         self.data = np.empty((self.SAMPLES_PER_CALLBACK, self.number_channels), dtype=np.float64)
 
@@ -72,6 +82,10 @@ class AnalogRead(DAQTaskBase):
                 return
 
             if self.mainWindow.moveLinMot[0]:
+
+                # Multiply by the conversion_factor if necessary (using in-place multiplication):
+                if self.xApplyFactors:
+                    self.data *= self.conv_factors
 
                 if self.mainWindow.actual_plotter is self:
                     self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = self.data[
@@ -109,7 +123,7 @@ class DigitalRead(DAQTaskBase):
         super().__init__(**kwargs)
 
         # Save the line index for each channel
-        self.lines_index = list()
+        lines_index = list()
 
         # Create a channel for each line
         for channel in list(self.CHANNELS.values()):
@@ -128,10 +142,20 @@ class DigitalRead(DAQTaskBase):
             self.CreateDIChan(channel[0]["port"],
                               "",
                             DAQmx_Val_ChanForAllLines)
-            self.lines_index.append(int(channel[0]["port"][-1]))
+            lines_index.append(int(channel[0]["port"][-1]))
 
+        # Define the task parameters
         self.CfgSampClkTiming("", self.SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, self.SAMPLES_PER_CALLBACK)
         self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, self.SAMPLES_PER_CALLBACK, 0)
+
+        # Define the line shifts:
+        self.shifts = np.array(lines_index, dtype=np.uint32)
+
+        # Conversion factor vector:
+        self.conv_factors = np.array([
+            channel[0]["conversion_factor"] if channel[0]["conversion_factor"] is not None else 1
+            for channel in list(self.CHANNELS.values())
+        ], dtype=np.uint32)
 
         # Determine buffer data type
         self.data = np.empty((self.SAMPLES_PER_CALLBACK, self.number_channels), dtype=np.uint32)
@@ -145,11 +169,14 @@ class DigitalRead(DAQTaskBase):
             if not self.mainWindow.xRecording[0]:
                 return
 
-            # Right-Shift correction (assuming 1 line per channel)
-            for n, index in enumerate(self.lines_index):
-                self.data[:,n] = self.data[:,n] >> index
-
             if self.mainWindow.moveLinMot[0]:
+
+                # Right-Shift correction (assuming 1 line per channel) and doing it in-place
+                self.data >>= self.shifts
+
+                # Multiply by the conversion_factor if necessary (using in-place multiplication):
+                if self.xApplyFactors:
+                    self.data *= self.conv_factors
 
                 if self.mainWindow.actual_plotter is self:
                     self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = self.data[
