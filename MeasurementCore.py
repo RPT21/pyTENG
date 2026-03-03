@@ -351,8 +351,13 @@ class AcquisitionProgram(QWidget):
             self.update_button()
             print("Experiment interrupted due to an error.")
 
-        # Delete temporal files
-        shutil.rmtree(self.local_path[0])
+        # Delete temporal files if no error, if error, delete all
+        if not self.error_flag:
+            for processor in self.buffer_processors:
+                processor.remove_file()
+        else:
+            # Delete all files
+            shutil.rmtree(self.local_path[0])
 
     def update_button(self):
         self.button.setText("STOP LinMot" if self.moveLinMot[0] else "START LinMot")
@@ -585,7 +590,7 @@ if __name__ == '__main__':
 
     # To debug, use this
     debug = True
-    tribo_lab = True
+    tribo_lab = False
     if debug:
         if tribo_lab:
             exp_dir = r"C:\Users\mmartic\Desktop\RogerTest"

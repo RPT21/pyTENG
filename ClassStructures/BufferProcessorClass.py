@@ -19,6 +19,7 @@ class BufferProcessor(QObject):
         self.task_name = task_name
         self.task_type = task_type
         self.file_handle = None
+        self.file_path = None
 
         # Create a list of names and a list of indices
         self.channel_names = list(self.channel_config.keys())
@@ -53,16 +54,23 @@ class BufferProcessor(QObject):
         print(f"File DAQ_{self.task_name}_{self.task_type}.bin has been closed")
 
     def open_file(self):
-        self.file_handle = open(f"{self.local_path[0]}/DAQ_{self.task_name}_{self.task_type}.bin", 'ab')
+        self.file_path = f"{self.local_path[0]}/DAQ_{self.task_name}_{self.task_type}.bin"
+        self.file_handle = open(self.file_path, 'ab')
+
+    def remove_file(self):
+        if os.path.exists(self.file_path):
+            os.remove(self.file_path)
+            print(f"File DAQ_{self.task_name}_{self.task_type}.bin has been closed")
+        else:
+            print(f"Error: File DAQ_{self.task_name}_{self.task_type}.bin not found.")
 
     def Binary_to_Pickle(self):
         """This function converts the numpy binary file to pandas dataframe and saves it as pickle file."""
-        file_path = f"{self.local_path[0]}/DAQ_{self.task_name}_{self.task_type}.bin"
 
         print(f"\nConverting DAQ_{self.task_name}_{self.task_type}.bin to Pickle ...")
 
         # Read the saved data
-        raw_data = np.fromfile(file_path, dtype=np.float64)
+        raw_data = np.fromfile(self.file_path, dtype=np.float64)
 
         # Reshape the array
         data = raw_data.reshape(-1, len(self.channel_indices))
@@ -75,11 +83,10 @@ class BufferProcessor(QObject):
         df.insert(0, "Time (s)", t)  # Insert time at the start
 
         # Save the dataframe
-        rawdata_dir = os.path.dirname(self.local_path[0])
         filename = f'DAQ-{self.task_name}_{self.task_type}-{self.mainWindow.exp_id}.pkl'
-        df.to_pickle(os.path.join(rawdata_dir, filename))
+        df.to_pickle(os.path.join(self.local_path[0], filename))
 
-        print("Data saved to location:", os.path.join(rawdata_dir, filename))
+        print("Data saved to location:", os.path.join(self.local_path[0], filename))
 
         return filename
 

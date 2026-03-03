@@ -1,6 +1,5 @@
 import os
 import pandas as pd
-import numpy as np
 from collections import defaultdict
 import warnings
 
@@ -52,7 +51,7 @@ def sort_function_Pickle(string):
     return int(split_string[-2]) + int(split_string[-1].split(".")[0])
 
 def CSV_merge(folder_path, exp_id):
-    """This function merges the CSV files found in folder_path and saves the merged file in the parent directory."""
+    """This function merges the CSV files found in folder_path and saves the merged file in the same directory."""
     files = [f for f in os.listdir(folder_path) if f.endswith('.csv')]
 
     if not files:
@@ -76,17 +75,16 @@ def CSV_merge(folder_path, exp_id):
         combined_DataFrame = pd.concat([combined_DataFrame, df], ignore_index=True)
     
     # Save concatenated DataFrame
-    rawdata_dir = os.path.dirname(folder_path)
     filename = f'Motor-{exp_id}.csv'
-    combined_DataFrame.to_csv(os.path.join(rawdata_dir, filename), index=False)
+    combined_DataFrame.to_csv(os.path.join(folder_path, filename), index=False)
     
-    print("Data saved to location:", os.path.join(rawdata_dir, filename), "\n")
+    print("Data saved to location:", os.path.join(folder_path, filename), "\n")
     
     return filename
 
 
 def Pickle_merge(folder_path, exp_id, groupby=None):
-    """This function merges the Pickle files found in folder_path and saves the merged file in the parent directory."""
+    """This function merges the Pickle files found in folder_path and saves the merged file in the same directory."""
     files = [f for f in os.listdir(folder_path) if f.endswith('.pkl')]
 
     if not files:
@@ -116,11 +114,10 @@ def Pickle_merge(folder_path, exp_id, groupby=None):
                 combined_DataFrame = pd.concat([combined_DataFrame, df], ignore_index=True)
 
             # Save concatenated DataFrame
-            rawdata_dir = os.path.dirname(folder_path)
             filenames.append(f'DAQ-{group}-{exp_id}.pkl')
-            combined_DataFrame.to_pickle(os.path.join(rawdata_dir, filenames[n]))
+            combined_DataFrame.to_pickle(os.path.join(folder_path, filenames[n]))
 
-            print("Data saved to location:", os.path.join(rawdata_dir, filenames[n]))
+            print("Data saved to location:", os.path.join(folder_path, filenames[n]))
 
         print("")
 
@@ -143,11 +140,10 @@ def Pickle_merge(folder_path, exp_id, groupby=None):
             combined_DataFrame = pd.concat([combined_DataFrame, df], ignore_index=True)
 
         # Save concatenated DataFrame
-        rawdata_dir = os.path.dirname(folder_path)
         filename = f'DAQ-{exp_id}.pkl'
-        combined_DataFrame.to_pickle(os.path.join(rawdata_dir, filename))
+        combined_DataFrame.to_pickle(os.path.join(folder_path, filename))
 
-        print("Data saved to location:", os.path.join(rawdata_dir, filename))
+        print("Data saved to location:", os.path.join(folder_path, filename))
 
         return filename
 
