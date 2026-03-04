@@ -1,7 +1,6 @@
 import os
 import re
 import logging
-from enum import nonmember
 
 import numpy as np
 import pandas as pd
@@ -84,20 +83,34 @@ DaqColumnsRenames = {
 # LOAD MOTOR RAWDATA
 # -----------------------------------------------------------------------------
 
-def LoadMotorFile(MotorFile):
+def LoadMotorFile(ExpPath):
     '''
     Loads and processes a motor CSV file.
     
     Parameters
     ----------
-    MotorFile : str
-        Path to the data file.
+    ExpPath : str
+        Path to the experiment folder.
     
     Returns
     -------
     pd.DataFrame or None
         Processed motor data or None if there is an error.
     '''
+
+    # Find files with CSV extension
+    files = [f for f in os.listdir(ExpPath) if f.endswith('.csv')]
+    if len(files) == 0:
+        logger0.error(f'No motor data file found in {ExpPath}.')
+        return None
+    elif len(files) > 1:
+        logger0.error(f'More than one motor data file found in {ExpPath}, the program cannot proceed.')
+        return None
+
+    # Define the MotorFile path
+    MotorFile = os.path.join(ExpPath, files[0])
+    MotorFile = os.path.normpath(MotorFile)
+
     try:
         dfMot = pd.read_csv(MotorFile, header=0, index_col=False,
                             delimiter=',', decimal='.')
@@ -145,14 +158,14 @@ def LoadMotorFile(MotorFile):
 # LOAD DAQ RAWDATA
 # -----------------------------------------------------------------------------
 
-def LoadDAQData(folder_path):
+def LoadDAQData(ExpPath):
     '''
     Loads and processes a DAQ pickle file.
     
     Parameters
     ----------
-    folder_path : str
-        Path to the folder with DAQ data
+    ExpPath : str
+        Path to the experiment folder.
     
     Returns
     -------
@@ -161,7 +174,7 @@ def LoadDAQData(folder_path):
     '''
 
     # Read the DAQ Data
-    dfDaq = merge_DAQ_data(folder_path)
+    dfDaq = merge_DAQ_data(ExpPath)
     
     # Drop non-defined columns:
     dropcols = [col for col in dfDaq.columns if col not in DaqColumnsRenames]
@@ -170,7 +183,7 @@ def LoadDAQData(folder_path):
     # Check if all defined columns exist
     for col in DaqColumnsRenames.keys():
         if col not in dfDaq.columns:
-            logger0.error(f'Column {col} not found in {DaqFile}.')
+            logger0.error(f'Column {col} not found in the experiment folder {ExpPath}.')
             return
     
     # Rename defined columns
@@ -235,7 +248,7 @@ def FindCycles(df):
 # LOAD AND SYNCHRONIZE RAWDATA FILES
 # -----------------------------------------------------------------------------
 
-def LoadFiles(MotorFile, DaqFile):
+def LoadFiles(ExpPath):
     '''
     Loads and synchronizes Motor and DAQ data files, returning combined cycles data.
     
@@ -249,13 +262,13 @@ def LoadFiles(MotorFile, DaqFile):
     tuple (pd.DataFrame, list)
         Combined data of all cycles and a list of (cicles_index, DataFrame) tuples.
     '''
-    # Load Motor File
-    dfMot = LoadMotorFile(MotorFile)
+    # Load Motor data
+    dfMot = LoadMotorFile(ExpPath)
     if dfMot is None:
         return None, None
     
-    # Load DAQ File
-    dfDaq = LoadDAQData(DaqFile)
+    # Load DAQ data
+    dfDaq = LoadDAQData(ExpPath)
     if dfDaq is None:
         return None, None
     
@@ -298,7 +311,6 @@ def LoadFiles(MotorFile, DaqFile):
     print("DAQ time: ", dfDaq_time)
     print("Difference: ", abs(dfMot_time - dfDaq_time), "seconds")
     dfMot['Time'] = dfMot['Time'] * (dfDaq_time / dfMot_time)
-
 
     # Synchronize dataframes
     [dfDaq, dfMot] = synchronize_dataframes([dfDaq, dfMot],
@@ -379,7 +391,6 @@ def LoadFiles(MotorFile, DaqFile):
     
     return dfData_all, Cycles_list
 
-
 # %% --------------------------------------------------------------------------
 # LOAD RAWDATA FILES AND PLOT POSITION AND VOLTAGE
 # -----------------------------------------------------------------------------
@@ -387,21 +398,18 @@ def LoadFiles(MotorFile, DaqFile):
 if __name__ == '__main__':
     debug = True
     if debug:
-        MotorFile = r"C:\Users\rpieres\Desktop\RogerTest\RawData\RawData\Motor-11022026_125956-C-Resistance 0.csv"
-        DaqFile = r"C:\Users\rpieres\Desktop\RogerTest\RawData\RawData"
+        ExpPath = r"C:\Users\rpieres\Desktop\Test\RawData\03032026_170404-PDMSvsNylon-10"
     else:
         logger0.req('Please select the data files to load.')
         root = tk.Tk()
         root.withdraw()
         root.lift()
         root.attributes('-topmost', True)
-        MotorFile = filedialog.askopenfilename(title="Select Motor CSV File")
-        if MotorFile:
-            DaqFile = filedialog.askdirectory(title="Select DAQ Data Folder")
+        ExpPath = filedialog.askdirectory(title="Select Experiment folder")
     
-    if MotorFile and DaqFile:
-        MotorFile, DaqFile = os.path.normpath(MotorFile), os.path.normpath(DaqFile)
-        dfData_all, Cycles_list = LoadFiles(MotorFile, DaqFile)
+    if ExpPath:
+        ExpPath = os.path.normpath(ExpPath)
+        dfData_all, Cycles_list = LoadFiles(ExpPath)
         
         if dfData_all is not None:
             plt.figure(figsize=(12, 6))
@@ -428,12 +436,3 @@ if __name__ == '__main__':
         
     else:
         logger0.info('No files were selected. Operation canceled.')
-        
-        
-
-
-
-
-
-
-
