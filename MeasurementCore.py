@@ -5,6 +5,8 @@ import numpy as np
 import pyqtgraph as pg
 from datetime import datetime
 from openpyxl import load_workbook
+import ezodf
+from copy import copy
 from openpyxl.utils import column_index_from_string, get_column_letter
 from PyQt5.QtWidgets import (QApplication, QPushButton, QVBoxLayout, QWidget,
                              QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog)
@@ -413,23 +415,75 @@ class AcquisitionProgram(QWidget):
 
             self.dev_comunicator.start_acquisition_signal.emit()
 
-    def add_experiment_row(self):
-        """Add a new row to ExpsDescription.xlsx with the experiment data if it doesn't already exist."""
-        excel_path = os.path.join(self.exp_dir, "ExpsDescription.xlsx")
-        
-        if os.path.isfile(excel_path):
-            wb = load_workbook(excel_path)
-            ws = wb.active
-            if not ws.tables:
-                print(f"Could not save the experiment row because the Excel file {excel_path} has no tables.")
-                return
+    def add_experiment_row(self, base_filename="Experiments"):
+        """
+        Search for Experiments file (.xlsx or .ods) in the directory
+        and append a new experiment row depending on its format.
+        """
+        folder_path = os.path.dirname(self.local_path[0])
+        xlsx_path = os.path.join(folder_path, f"{base_filename}.xlsx")
+        ods_path = os.path.join(folder_path, f"{base_filename}.ods")
+
+        if os.path.isfile(xlsx_path):
+            file_path = xlsx_path
+            file_type = "excel"
+        elif os.path.isfile(ods_path):
+            file_path = ods_path
+            file_type = "openoffice"
         else:
-            print(f"Could not save the experiment row because the Excel file {excel_path} was not found.")
+            print(
+                f"Could not save the experiment row. Neither {base_filename}.xlsx nor {base_filename}.ods were found.")
+            return
+
+        # Read the string and tell Python what each number represents
+        # %d = day, %m = month, %Y = year (4 digits), %H = hour, %M = minute, %S = second
+        date_object = datetime.strptime(self.date_now, "%d%m%Y_%H%M%S")
+
+        # Extract from the date the day, month, year
+        date_time = date_object.date()
+
+        # Try to convert the rload_id to integer:
+        try:
+            rload_id = int(self.rload_id)
+        except:
+            rload_id = self.rload_id
+
+        # 1. Calculamos el camino relativo desde el Excel hasta la carpeta destino
+        ruta_relativa = os.path.relpath(self.local_path[0], start=self.exp_dir)
+
+        # 2. TRUCO VITAL: Los hipervínculos en Excel y ODS requieren barras diagonales (/)
+        # incluso en Windows. Si no haces esto, el enlace fallará al hacer clic.
+        enlace_seguro = ruta_relativa.replace('\\', '/')
+
+        # 2. Prepare the common new row data
+        new_row = [
+                      f"{self.tribu_id}-{self.rload_id}",
+                      self.tribu_id,
+                      date_time,
+                      self.exp_id,
+                      "none",
+                      rload_id
+                  ] + [""] * 23
+
+        # 3. Process according to file type
+        if file_type == "excel":
+            self._add_to_excel(file_path, new_row)
+        elif file_type == "openoffice":
+            self._add_to_ods(file_path, new_row)
+
+    def _add_to_excel(self, file_path, new_row):
+        """Helper method to handle .xlsx files using openpyxl."""
+        wb = load_workbook(file_path)
+        ws = wb.active
+
+        if not ws.tables:
+            print(f"Could not save the experiment row because the Excel file {file_path} has no tables.")
             return
 
         table_name = list(ws.tables.keys())[0]
         table = ws.tables[table_name]
         start_cell, end_cell = table.ref.split(":")
+
         start_col = "".join(filter(str.isalpha, start_cell))
         start_row = int("".join(filter(str.isdigit, start_cell)))
         end_col = "".join(filter(str.isalpha, end_cell))
@@ -437,17 +491,6 @@ class AcquisitionProgram(QWidget):
 
         start_col_idx = column_index_from_string(start_col)
         end_col_idx = column_index_from_string(end_col)
-
-        # Create the new row to be inserted
-        new_row = [
-            self.exp_id,
-            self.tribu_id,
-            self.date_now,
-            self.daq_file,
-            self.motor_file,
-            "",
-            self.rload_id
-        ] + [""] * 23  # Empty columns to fill with blank spaces
 
         # Find the first empty row
         for row_idx in range(start_row, end_row + 1):
@@ -460,25 +503,72 @@ class AcquisitionProgram(QWidget):
 
         # Insert the new row
         for i, value in enumerate(new_row, start=start_col_idx):
-            ws.cell(row=first_empty_row, column=i, value=value)
+            new_cell = ws.cell(row=first_empty_row, column=i, value=value)
 
-        # Update the table range if needed
+            # Copy the format of the upper row (if this is not the first row)
+            if first_empty_row > 1:
+                old_cell = ws.cell(row=first_empty_row - 1, column=i)
+
+                new_cell.font = copy(old_cell.font)
+                new_cell.border = copy(old_cell.border)
+                new_cell.fill = copy(old_cell.fill)
+                new_cell.number_format = copy(old_cell.number_format)
+                new_cell.alignment = copy(old_cell.alignment)
+
+        # Update the table range
         new_end_row = max(end_row, first_empty_row)
         if new_end_row != end_row:
-            new_ref = f"{start_col}{start_row}:{end_col}{new_end_row}"
-            table.ref = new_ref
+            table.ref = f"{start_col}{start_row}:{end_col}{new_end_row}"
 
-        # Adjust column widths (optional)
-        for col_idx in range(start_col_idx, end_col_idx + 1):
-            column_letter = get_column_letter(col_idx)
-            max_length = 0
-            for row in range(start_row, new_end_row + 1):  # Include new row
-                cell = ws.cell(row=row, column=col_idx)
-                if cell.value:
-                    max_length = max(max_length, len(str(cell.value)))
-            ws.column_dimensions[column_letter].width = max_length + 2
+        wb.save(file_path)
 
-        wb.save(excel_path)
+    def _add_to_ods(self, file_path, new_row):
+        """Helper method to handle .ods files using ezodf."""
+        doc = ezodf.opendoc(file_path)
+        sheet = doc.sheets[0]
+
+        # Find the first empty row
+        first_empty_row = None
+        for row_idx, row in enumerate(sheet.rows()):
+            if all(cell.value is None or str(cell.value).strip() == "" for cell in row):
+                first_empty_row = row_idx
+                break
+
+        # If no empty row is found, append a new structural row at the end
+        if first_empty_row is None:
+            first_empty_row = sheet.nrows()
+            sheet.append_rows(1)
+
+        # Insert the new data cell by cell and copy style
+        for col_idx, value in enumerate(new_row):
+            # Add columns structurally if needed
+            if col_idx >= sheet.ncols():
+                sheet.append_columns(1)
+
+            # Select objective cell
+            new_cell = sheet[first_empty_row, col_idx]
+
+            # Insert the value
+            if value != "":
+                new_cell.set_value(value)
+
+            # Copy style from upper cell
+            if first_empty_row > 0:
+                old_cell = sheet[first_empty_row - 1, col_idx]
+                if old_cell.style_name is not None:  # Default format is None
+                    new_cell.style_name = old_cell.style_name
+
+            if col_idx == 2:
+                # Force the format of the data
+                new_cell.set_value(value, value_type="date")
+
+            if col_idx == 3:
+                new_cell.formula = f'of:=HYPERLINK("{self.exp_id}/"; "{self.exp_id}")'
+                new_cell.style_name = "Hyperlink"
+
+        # Save the OpenDocument
+        doc.backup = False
+        doc.save()
 
     def closeEvent(self, event):
 
@@ -606,11 +696,9 @@ if __name__ == '__main__':
     window = AcquisitionProgram(CHANNELS,
                                 automatic_mode=False,
                                 RESISTANCE_DATA=resistance_list,
-                                measure_time=10,
+                                measure_time=1,
                                 exp_dir=exp_dir,
                                 tribu_id=tribu_id,
                                 rload_id=rload_id)
     window.show()
     sys.exit(app.exec_())
-
-
