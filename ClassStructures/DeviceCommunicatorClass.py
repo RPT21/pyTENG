@@ -44,27 +44,33 @@ class DeviceCommunicator(QObject):
 
         # DAQ Analog Task
         self.AcquisitionTasks = []
-        for n, task in enumerate(self.mainWindow.CHANNELS):
+        for n, task in enumerate(self.mainWindow.DAQ_TASKS):
+
+            # Make a reference for ACQUISITION_PARAMS:
+            ACQUISITION_PARAMS = self.mainWindow.ACQUISITION_PARAMS[task["NAME"]]
+
             if task["TYPE"] == "analog":
-                self.AcquisitionTasks.append(AnalogRead(PLOT_BUFFER=self.mainWindow.plot_buffer,
+                self.AcquisitionTasks.append(
+                    AnalogRead(PLOT_BUFFER_SIZE=ACQUISITION_PARAMS["PLOT_BUFFER_SIZE"],
                                     BUFFER_PROCESSOR=self.mainWindow.buffer_processors[n],
-                                    SIGNAL_SELECTOR=None,
-                                    BUFFER_SIZE=self.mainWindow.BUFFER_SIZE,
+                                    BUFFER_SIZE=ACQUISITION_PARAMS["BUFFER_SIZE"],
                                     CHANNELS=task["DAQ_CHANNELS"],
-                                    SAMPLE_RATE=self.mainWindow.SAMPLE_RATE,
-                                    SAMPLES_PER_CALLBACK=self.mainWindow.SAMPLES_PER_CALLBACK,
+                                    SAMPLE_RATE=task["SAMPLE_RATE"],
+                                    SAMPLES_PER_CALLBACK=ACQUISITION_PARAMS["SAMPLES_PER_CALLBACK"],
                                     AcquisitionProgramReference=self.mainWindow,
-                                    TRIGGER_SOURCE=task["TRIGGER_SOURCE"]))
+                                    TRIGGER_SOURCE=task["TRIGGER_SOURCE"])
+                )
             elif task["TYPE"] == "digital":
-                self.AcquisitionTasks.append(DigitalRead(PLOT_BUFFER=self.mainWindow.plot_buffer,
-                                                        BUFFER_PROCESSOR=self.mainWindow.buffer_processors[n],
-                                                        SIGNAL_SELECTOR=None,
-                                                        BUFFER_SIZE=self.mainWindow.BUFFER_SIZE,
-                                                        CHANNELS=task["DAQ_CHANNELS"],
-                                                        SAMPLE_RATE=self.mainWindow.SAMPLE_RATE,
-                                                        SAMPLES_PER_CALLBACK=self.mainWindow.SAMPLES_PER_CALLBACK,
-                                                        AcquisitionProgramReference=self.mainWindow,
-                                                        TRIGGER_SOURCE=task["TRIGGER_SOURCE"]))
+                self.AcquisitionTasks.append(
+                    DigitalRead(PLOT_BUFFER_SIZE=ACQUISITION_PARAMS["PLOT_BUFFER_SIZE"],
+                                    BUFFER_PROCESSOR=self.mainWindow.buffer_processors[n],
+                                    BUFFER_SIZE=ACQUISITION_PARAMS["BUFFER_SIZE"],
+                                    CHANNELS=task["DAQ_CHANNELS"],
+                                    SAMPLE_RATE=task["SAMPLE_RATE"],
+                                    SAMPLES_PER_CALLBACK=ACQUISITION_PARAMS["SAMPLES_PER_CALLBACK"],
+                                    AcquisitionProgramReference=self.mainWindow,
+                                    TRIGGER_SOURCE=task["TRIGGER_SOURCE"])
+                )
             else:
                 raise Exception("Error the task TYPE is not analog neither digital")
 
@@ -222,6 +228,11 @@ class DeviceCommunicator(QObject):
                     time.sleep(0.1)
                     break
         print("All tasks have stopped")
+
+        # Flush plot buffers
+        for task in self.AcquisitionTasks:
+            task.plot_buffer.fill(np.nan)
+        print("All plot buffers have been flushed")
 
         # Save the DAQ data and download the data from the raspberry if no error
         if not self.mainWindow.error_flag:

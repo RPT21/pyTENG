@@ -9,9 +9,8 @@ from ctypes import byref, c_int32
 
 class DAQTaskBase(Task):
     def __init__(self,
-                 PLOT_BUFFER,
+                 PLOT_BUFFER_SIZE,
                  BUFFER_PROCESSOR,
-                 SIGNAL_SELECTOR,
                  BUFFER_SIZE,
                  CHANNELS,
                  SAMPLE_RATE,
@@ -25,13 +24,16 @@ class DAQTaskBase(Task):
         self.SAMPLES_PER_CALLBACK = SAMPLES_PER_CALLBACK
         self.BUFFER_SIZE = BUFFER_SIZE
         self.CHANNELS = CHANNELS
+        self.PLOT_BUFFER_SIZE = PLOT_BUFFER_SIZE
         self.number_channels = len(self.CHANNELS)
 
-        self.plot_buffer = PLOT_BUFFER
+        # Define the plot buffer
+        self.plot_buffer = np.empty((self.PLOT_BUFFER_SIZE, self.number_channels), dtype=np.float64)
+        self.plot_buffer.fill(np.nan)
+
         self.write_index = 0
         self.BUFFER_PROCESSOR = BUFFER_PROCESSOR
         self.processor_signal = BUFFER_PROCESSOR.process_buffer_signal
-        self.data_column_selector = SIGNAL_SELECTOR
 
         self.buffer1 = np.empty((self.BUFFER_SIZE, self.number_channels), dtype=np.float64)
         self.buffer2 = np.empty((self.BUFFER_SIZE, self.number_channels), dtype=np.float64)
@@ -87,11 +89,11 @@ class AnalogRead(DAQTaskBase):
                 if self.xApplyFactors:
                     self.data *= self.conv_factors
 
-                if self.mainWindow.actual_plotter is self:
-                    self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = self.data[
-                        :, self.data_column_selector.value()[-1]]
-                    self.write_index = (self.write_index + self.SAMPLES_PER_CALLBACK) % self.plot_buffer.size
+                # Store data in the plot buffer
+                self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK, :] = self.data
+                self.write_index = (self.write_index + self.SAMPLES_PER_CALLBACK) % self.PLOT_BUFFER_SIZE
 
+                # Store data in the save buffer
                 self.current_buffer[self.index:self.index + self.SAMPLES_PER_CALLBACK, :] = self.data
                 self.index += self.SAMPLES_PER_CALLBACK
 
@@ -112,7 +114,7 @@ class AnalogRead(DAQTaskBase):
 
         except Exception as e:
             if not self.mainWindow.error_flag:
-                print(f"DAQ error in callback: {e}")
+                print(f"Analog DAQ error in callback: {e}")
                 self.mainWindow.automatic_mode = False
                 self.mainWindow.error_flag = True
                 self.mainWindow.trigger_acquisition_signal.emit()
@@ -180,10 +182,8 @@ class DigitalRead(DAQTaskBase):
                 if self.xApplyFactors:
                     self.data *= self.conv_factors
 
-                if self.mainWindow.actual_plotter is self:
-                    self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK] = self.data[
-                        :, self.data_column_selector.value()[-1]]
-                    self.write_index = (self.write_index + self.SAMPLES_PER_CALLBACK) % self.plot_buffer.size
+                self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK, :] = self.data
+                self.write_index = (self.write_index + self.SAMPLES_PER_CALLBACK) % self.PLOT_BUFFER_SIZE
 
                 self.current_buffer[self.index:self.index + self.SAMPLES_PER_CALLBACK, :] = self.data
                 self.index += self.SAMPLES_PER_CALLBACK
@@ -205,7 +205,7 @@ class DigitalRead(DAQTaskBase):
 
         except Exception as e:
             if not self.mainWindow.error_flag:
-                print(f"DAQ error in callback: {e}")
+                print(f"Digital DAQ error in callback: {e}")
                 self.mainWindow.automatic_mode = False
                 self.mainWindow.error_flag = True
                 self.mainWindow.trigger_acquisition_signal.emit()

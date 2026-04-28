@@ -7,7 +7,7 @@ from datetime import datetime
 from openpyxl import load_workbook
 import ezodf
 from copy import copy
-from openpyxl.utils import column_index_from_string, get_column_letter
+from openpyxl.utils import column_index_from_string
 from PyQt5.QtWidgets import (QApplication, QPushButton, QVBoxLayout, QWidget,
                              QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, pyqtSlot
@@ -34,26 +34,25 @@ def set_group_readonly(group, readonly=True):
 
 # ---------------- INTERFACE AND PLOT  ----------------
 class AcquisitionProgram(QWidget):
-    
+
     trigger_acquisition_signal = pyqtSignal()
     start_acquisition_return_signal = pyqtSignal()
     stop_acquisition_return_signal = pyqtSignal()
     update_button_signal = pyqtSignal()
     
     def __init__(self,
-                 CHANNELS,
+                 DAQ_TASKS,
                  automatic_mode=False,
                  RESISTANCE_DATA=None,
-                 exp_dir=None, 
+                 exp_dir=None,
                  tribu_id=None,
                  rload_id=None,
                  DAQ_CODE=(0, 0, 0, 0, 0, 1),
-                 measure_time=30, 
-                 SAMPLE_RATE=10000,
-                 SAMPLES_PER_CALLBACK=100,
-                 CALLBACKS_PER_BUFFER=500,
-                 TimeWindowLength=3,  # seconds
-                 refresh_rate=10, # milliseconds
+                 measure_time=30,
+                 DAQ_USB_TRANSFER_FREQUENCY=50,  # USB transfers per second (Hz)
+                 BUFFER_SAVING_TIME_INTERVAL=2.5,  # Save buffer to disk every X seconds
+                 TimeWindowLength=3,  # Time window length for the plot (seconds)
+                 ScreenRefreshFrequency=60,  # Screen Refresh Rate (Hz)
                  parent=None,
                  mainWindowButtons=None,
                  mainWindowParamGroups=None,
@@ -78,15 +77,49 @@ class AcquisitionProgram(QWidget):
         
         # ---------------- CONFIG ----------------
 
-        self.SAMPLE_RATE = SAMPLE_RATE
-        self.SAMPLES_PER_CALLBACK = SAMPLES_PER_CALLBACK
-        self.CALLBACKS_PER_BUFFER = CALLBACKS_PER_BUFFER
-        self.BUFFER_SIZE = SAMPLES_PER_CALLBACK * CALLBACKS_PER_BUFFER
+        # DAQ acquisition parameters
+        self.DAQ_USB_TRANSFER_FREQUENCY = DAQ_USB_TRANSFER_FREQUENCY
+        self.BUFFER_SAVING_TIME_INTERVAL = BUFFER_SAVING_TIME_INTERVAL
+        self.ACQUISITION_PARAMS = {}
 
+        # Plot parameters
         self.TimeWindowLength = TimeWindowLength
-        self.PLOT_BUFFER_SIZE = ((SAMPLE_RATE * TimeWindowLength) // SAMPLES_PER_CALLBACK) * SAMPLES_PER_CALLBACK
-        self.refresh_rate = refresh_rate
-        self.CHANNELS = CHANNELS
+        self.refresh_rate = int((1 / ScreenRefreshFrequency * 1000))  # Convert to milliseconds for QTimer
+
+        # Calculate buffer sizes for each DAQ Task
+        for task in DAQ_TASKS:
+
+            if task["SAMPLE_RATE"] % DAQ_USB_TRANSFER_FREQUENCY != 0:
+                print(f"Warning: The sample rate of task {task['NAME']} is not an integer multiple of the DAQ USB Transfer Frequency.")
+                print(f"Finding the closest DAQ USB transfer frequency that is a divisor of {task["SAMPLE_RATE"]} Hz.")
+
+                divisors = set()
+                for i in range(1, int(np.sqrt(task["SAMPLE_RATE"])) + 1):
+                    if task["SAMPLE_RATE"] % i == 0:
+                        divisors.add(i)
+                        divisors.add(task["SAMPLE_RATE"] // i)
+
+                # Keep only divisors greater or equal than 10
+                valid_divisors = [d for d in divisors if d >= 10]
+
+                # Find the closest to target
+                CORRECTED_USB_FREQUENCY = min(valid_divisors, key=lambda x: abs(x - DAQ_USB_TRANSFER_FREQUENCY))
+                print(f"The new USB transfer frequency for task {task['NAME']} is: ", CORRECTED_USB_FREQUENCY, " Hz.")
+            else:
+                CORRECTED_USB_FREQUENCY = DAQ_USB_TRANSFER_FREQUENCY
+
+            # Calculate buffer parameters based on task sample rate
+            samples_per_callback = int(task["SAMPLE_RATE"] / CORRECTED_USB_FREQUENCY)
+            callbacks_per_buffer = int(BUFFER_SAVING_TIME_INTERVAL * CORRECTED_USB_FREQUENCY)
+            plot_buffer_size = ((task["SAMPLE_RATE"] * TimeWindowLength) // samples_per_callback) * samples_per_callback
+
+            self.ACQUISITION_PARAMS[task["NAME"]] = {
+                'SAMPLES_PER_CALLBACK': samples_per_callback,
+                'BUFFER_SIZE': samples_per_callback * callbacks_per_buffer,
+                'PLOT_BUFFER_SIZE': plot_buffer_size
+            }
+
+        self.DAQ_TASKS = DAQ_TASKS
         
         self.automatic_mode = automatic_mode
         self.error_flag = False
@@ -98,12 +131,13 @@ class AcquisitionProgram(QWidget):
         self.mainWindowButtons = mainWindowButtons
         self.mainWindowParamGroups = mainWindowParamGroups
         self.actual_plotter = None
+        self.index_pointer = None
         self.local_path = [""]
 
         # The order of definition is the order of saving into buffer, so we introduce an index to know the position:
-        for device in CHANNELS:
-            for idx, (name, config) in enumerate(device["DAQ_CHANNELS"].items()):
-                device["DAQ_CHANNELS"][name] = [config, idx]
+        for task in DAQ_TASKS:
+            for idx, (name, config) in enumerate(task["DAQ_CHANNELS"].items()):
+                task["DAQ_CHANNELS"][name] = [config, idx]
 
         # Check RESISTANCE_DATA when automatic_mode enabled
         if self.automatic_mode:
@@ -143,15 +177,10 @@ class AcquisitionProgram(QWidget):
         else:
             self.rload_id = None
 
-        # Define the plot widget and the plot buffers
-        self.plot_buffer = np.empty(self.PLOT_BUFFER_SIZE, dtype=np.float64)
-        self.plot_buffer.fill(np.nan)
-
-        self.display_data = np.empty(self.PLOT_BUFFER_SIZE, dtype=np.float64)
-        self.display_data.fill(np.nan)
-
+        # Define the plot widget
         self.plot_widget = pg.PlotWidget()
-        self.curve = self.plot_widget.plot(self.plot_buffer, pen='y')
+        self.curve = self.plot_widget.plot([], pen='y')
+        self.display_data = np.array([], dtype=np.float64)
 
         # Acquisition control button:
         self.button = QPushButton("START LinMot")
@@ -177,15 +206,15 @@ class AcquisitionProgram(QWidget):
         # Buffer processor and thread for each DAQ Task
         self.buffer_processors = []
         self.thread_savers = []
-        self.device_names = []
-        for n, device in enumerate(self.CHANNELS):
-            self.buffer_processors.append(BufferProcessor(fs=self.SAMPLE_RATE,
+        self.task_names = []
+        for n, task in enumerate(self.DAQ_TASKS):
+            self.buffer_processors.append(BufferProcessor(fs=task["SAMPLE_RATE"],
                                                           mainWindowReference=self,
-                                                          channel_config=device["DAQ_CHANNELS"],
-                                                          task_name=device["NAME"],
-                                                          task_type=device["TYPE"]))
+                                                          channel_config=task["DAQ_CHANNELS"],
+                                                          task_name=task["NAME"],
+                                                          task_type=task["TYPE"]))
             self.thread_savers.append(QThread())
-            self.device_names.append(device["NAME"])
+            self.task_names.append(task["NAME"])
             self.buffer_processors[n].moveToThread(self.thread_savers[n])
             self.thread_savers[n].start()
 
@@ -215,22 +244,19 @@ class AcquisitionProgram(QWidget):
         self.update_button_signal.connect(self.update_button)
 
         # Insert the DAQ Task reference in each channel and generate a dictionary with all channels
-        total_channels = {}
-        for n, device in enumerate(self.CHANNELS):
-            for channel in device["DAQ_CHANNELS"].keys():
-                device["DAQ_CHANNELS"][channel].insert(-1, self.dev_comunicator.AcquisitionTasks[n])
-            total_channels = total_channels | device["DAQ_CHANNELS"]
+        total_tasks = {}
+        for n, task in enumerate(self.DAQ_TASKS):
+            for channel in task["DAQ_CHANNELS"].keys():
+                task["DAQ_CHANNELS"][channel].insert(-1, self.dev_comunicator.AcquisitionTasks[n])
+            total_tasks = total_tasks | task["DAQ_CHANNELS"]
 
         # Signal Selector
-        self.signal_selector = Parameter.create(name='Signal', type='list', limits=total_channels)
+        self.signal_selector = Parameter.create(name='Signal', type='list', limits=total_tasks)
         self.signal_selector.sigValueChanged.connect(self._update_DAQ_Plot_Buffer)
 
         # Now we can assign the signal selector to the DAQs:
         for task in self.dev_comunicator.AcquisitionTasks:
             task.data_column_selector = self.signal_selector
-
-        # Assign plot buffer to a DAQ Task
-        self.actual_plotter = self.dev_comunicator.AcquisitionTasks[0]
 
         # Set the layout
         self.tree = ParameterTree()
@@ -246,20 +272,25 @@ class AcquisitionProgram(QWidget):
             self.trigger_acquisition()
 
     def _update_DAQ_Plot_Buffer(self, param, value):
-
-        # Stop plotting and reset buffer
-        self.actual_plotter = None
-        self.plot_buffer.fill(np.nan)
-
-        # Reset the write_index pointer from the DAQ Task that is going to plot
+        # Obtain the DAQ Task Reference
         DAQ_Task_Reference = value[1]
-        DAQ_Task_Reference.write_index = 0
 
-        # Set the new plotter
+        # Disconnect the plotter from the screen
+        self.actual_plotter = None
+
+        # Reshape the display_data buffer
+        if self.display_data.size != DAQ_Task_Reference.PLOT_BUFFER_SIZE:
+            self.display_data = np.empty(DAQ_Task_Reference.PLOT_BUFFER_SIZE, dtype=np.float64)
+
+        # Calculate the array index corresponding to the selected signal
+        self.index_pointer = self.signal_selector.value()[-1]
+
+        # Select the actual plotter
         self.actual_plotter = DAQ_Task_Reference
 
-    def reset_buffer(self):
-        self.plot_buffer.fill(np.nan)
+    def flush_screen(self):
+        self.actual_plotter = None
+        self.curve.setData([])
 
     def update_countdown(self):
 
@@ -286,10 +317,20 @@ class AcquisitionProgram(QWidget):
                 self.trigger_acquisition()
     
     def update_plot(self):
-        if self.actual_plotter:
-            self.display_data[0:(self.PLOT_BUFFER_SIZE - self.actual_plotter.write_index)] = self.plot_buffer[self.actual_plotter.write_index:]
-            self.display_data[(self.PLOT_BUFFER_SIZE - self.actual_plotter.write_index):] = self.plot_buffer[:self.actual_plotter.write_index]
-            self.curve.setData(self.display_data)
+        if self.actual_plotter is None:
+            return
+        if self.display_data.size == 0:
+            return
+
+        plot_buffer = self.actual_plotter.plot_buffer
+        plot_buffer_size = self.actual_plotter.PLOT_BUFFER_SIZE
+        write_index = self.actual_plotter.write_index
+
+        tail_size = plot_buffer_size - write_index
+        self.display_data[:tail_size] = plot_buffer[write_index:, self.index_pointer]
+        self.display_data[tail_size:] = plot_buffer[:write_index, self.index_pointer]
+
+        self.curve.setData(self.display_data)
 
 
     @pyqtSlot()
@@ -300,6 +341,9 @@ class AcquisitionProgram(QWidget):
             self.countdown_display.setText(f"Remaining time: {self.remaining_seconds} s")
             self.measurement_timer.start(1000)  # 1 sec
             self.should_save_data = False
+
+            # Assign the plotter to the selected signal
+            self.actual_plotter = self.signal_selector.value()[-2]
 
             self.update_button()
             print("The acquisition has started successfully!")
@@ -315,8 +359,8 @@ class AcquisitionProgram(QWidget):
     @pyqtSlot()
     def stop_acquisition_return(self):
 
-        # Reset the plot buffer to NaN values
-        self.reset_buffer()
+        # Clean the screen
+        self.flush_screen()
 
         # Close the opened files
         for processor in self.buffer_processors:
@@ -632,9 +676,10 @@ class AcquisitionProgram(QWidget):
 # ---------------- MAIN ----------------
 if __name__ == '__main__':
 
-    CHANNELS = [
+    DAQ_TASKS = [
         {
             "NAME": "Dev1",
+            "SAMPLE_RATE": 10000,
 
             "DAQ_CHANNELS":{
                 "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff, "conversion_factor": None},
@@ -649,6 +694,7 @@ if __name__ == '__main__':
 
         {
             "NAME": "Dev2",
+            "SAMPLE_RATE": 10000,
 
             "DAQ_CHANNELS":{
                 # "LinMot_Enable": {"port":"Dev2/ai0", "port_config":DAQmx_Val_RSE, "conversion_factor": None},
@@ -680,7 +726,7 @@ if __name__ == '__main__':
 
     # To debug, use this
     debug = True
-    tribo_lab = False
+    tribo_lab = True
     if debug:
         if tribo_lab:
             exp_dir = r"C:\Users\mmartic\Desktop\RogerTest"
@@ -693,7 +739,7 @@ if __name__ == '__main__':
         tribu_id = None
         rload_id = None
 
-    window = AcquisitionProgram(CHANNELS,
+    window = AcquisitionProgram(DAQ_TASKS,
                                 automatic_mode=False,
                                 RESISTANCE_DATA=resistance_list,
                                 measure_time=1,
