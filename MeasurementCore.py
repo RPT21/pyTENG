@@ -1,15 +1,15 @@
 import os
 import sys
 import shutil
+import copy
+import json
 import numpy as np
 import pyqtgraph as pg
 from datetime import datetime
-from openpyxl import load_workbook
-import ezodf
-from copy import copy
-from openpyxl.utils import column_index_from_string
+from openpyxl import load_workbook, Workbook
+from openpyxl.styles import Alignment, PatternFill, Font
 from PyQt5.QtWidgets import (QApplication, QPushButton, QVBoxLayout, QWidget,
-                             QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog)
+                             QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog, QDialog)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, pyqtSlot
 from MyMerger import CSV_merge
 from pyqtgraph.parametertree import Parameter, ParameterTree
@@ -24,11 +24,55 @@ from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Di
 import logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 
-def set_group_readonly(group, readonly=True):
+def _get_daq_internal_buffer_size(task_sampling_rate):
+    """
+    Calculate the internal DAQ buffer size based on the task sampling rate.
+
+    Rules:
+    - 0-100 Hz: 1,000
+    - 101-10,000 Hz: 10,000
+    - 10,001-1,000,000 Hz: 100,000
+    - >1,000,000 Hz: 1,000,000
+    """
+    if task_sampling_rate <= 100:
+        return 1000
+    elif task_sampling_rate <= 10000:
+        return 10000
+    elif task_sampling_rate <= 1000000:
+        return 100000
+    else:
+        return 1000000
+
+def _find_divisors(n):
+    """Find all divisors of n, sorted"""
+    divisors = set()
+    for i in range(1, int(np.sqrt(n)) + 1):
+        if n % i == 0:
+            divisors.add(i)
+            divisors.add(n // i)
+    return sorted(divisors)
+
+def _normalize_port_config(value):
+    """Convert DAQmx port config constants to their symbolic names for JSON output."""
+    if value == DAQmx_Val_Diff:
+        return "DAQmx_Val_Diff"
+    if value == DAQmx_Val_RSE:
+        return "DAQmx_Val_RSE"
+    return value
+
+def _normalize_daq_tasks_for_json(DAQ_TASKS_METADATA):
+    """Return a JSON-friendly deep copy of DAQ task definitions."""
+    for task in DAQ_TASKS_METADATA:
+        for channel in task.get("DAQ_CHANNELS", {}).values():
+            if isinstance(channel, dict) and "port_config" in channel:
+                channel["port_config"] = _normalize_port_config(channel["port_config"])
+    return DAQ_TASKS_METADATA
+
+def _set_group_readonly(group, readonly=True):
     group.setReadonly(readonly)
     for child in group.children():
         if child.hasChildren():
-            set_group_readonly(child, readonly)
+            _set_group_readonly(child, readonly)
         else:
             child.setReadonly(readonly)
 
@@ -42,6 +86,7 @@ class AcquisitionProgram(QWidget):
     
     def __init__(self,
                  DAQ_TASKS,
+                 METADATA_COLUMNS,
                  automatic_mode=False,
                  RESISTANCE_DATA=None,
                  exp_dir=None,
@@ -49,7 +94,7 @@ class AcquisitionProgram(QWidget):
                  rload_id=None,
                  DAQ_CODE=(0, 0, 0, 0, 0, 1),
                  measure_time=30,
-                 DAQ_USB_TRANSFER_FREQUENCY=50,  # USB transfers per second (Hz)
+                 DAQ_USB_TRANSFER_FREQUENCY=60,  # USB transfers per second (Hz)
                  BUFFER_SAVING_TIME_INTERVAL=2.5,  # Save buffer to disk every X seconds
                  TimeWindowLength=3,  # Time window length for the plot (seconds)
                  ScreenRefreshFrequency=60,  # Screen Refresh Rate (Hz)
@@ -81,6 +126,8 @@ class AcquisitionProgram(QWidget):
         self.DAQ_USB_TRANSFER_FREQUENCY = DAQ_USB_TRANSFER_FREQUENCY
         self.BUFFER_SAVING_TIME_INTERVAL = BUFFER_SAVING_TIME_INTERVAL
         self.ACQUISITION_PARAMS = {}
+        self.METADATA_COLUMNS = METADATA_COLUMNS
+        self.measure_time = measure_time
 
         # Plot parameters
         self.TimeWindowLength = TimeWindowLength
@@ -88,38 +135,37 @@ class AcquisitionProgram(QWidget):
 
         # Calculate buffer sizes for each DAQ Task
         for task in DAQ_TASKS:
+            # Get internal DAQ buffer size based on total sampling rate
+            internal_buffer_size = _get_daq_internal_buffer_size(task["SAMPLE_RATE"])
 
-            if task["SAMPLE_RATE"] % DAQ_USB_TRANSFER_FREQUENCY != 0:
-                print(f"Warning: The sample rate of task {task['NAME']} is not an integer multiple of the DAQ USB Transfer Frequency.")
-                print(f"Finding the closest DAQ USB transfer frequency that is a divisor of {task["SAMPLE_RATE"]} Hz.")
+            # Calculate initial SAMPLES_PER_CALLBACK
+            initial_samples_per_callback = int(task["SAMPLE_RATE"] / DAQ_USB_TRANSFER_FREQUENCY)
 
-                divisors = set()
-                for i in range(1, int(np.sqrt(task["SAMPLE_RATE"])) + 1):
-                    if task["SAMPLE_RATE"] % i == 0:
-                        divisors.add(i)
-                        divisors.add(task["SAMPLE_RATE"] // i)
+            # Find divisors of internal buffer size
+            divisors_of_internal_buffer = _find_divisors(internal_buffer_size)
 
-                # Keep only divisors greater or equal than 10
-                valid_divisors = [d for d in divisors if d >= 10]
+            # Pick the divisor closest to initial_samples_per_callback
+            samples_per_callback = min(divisors_of_internal_buffer,
+                                      key=lambda x: abs(x - initial_samples_per_callback))
 
-                # Find the closest to target
-                CORRECTED_USB_FREQUENCY = min(valid_divisors, key=lambda x: abs(x - DAQ_USB_TRANSFER_FREQUENCY))
-                print(f"The new USB transfer frequency for task {task['NAME']} is: ", CORRECTED_USB_FREQUENCY, " Hz.")
-            else:
-                CORRECTED_USB_FREQUENCY = DAQ_USB_TRANSFER_FREQUENCY
+            # Log the adjustment if it changed
+            if samples_per_callback != initial_samples_per_callback:
+                print(f"Task {task['NAME']}: Adjusted SAMPLES_PER_CALLBACK from {initial_samples_per_callback} to {samples_per_callback}")
+                print(f"  Task sampling rate: {task["SAMPLE_RATE"]} Hz, DAQ Internal buffer size: {internal_buffer_size}")
 
-            # Calculate buffer parameters based on task sample rate
-            samples_per_callback = int(task["SAMPLE_RATE"] / CORRECTED_USB_FREQUENCY)
-            callbacks_per_buffer = int(BUFFER_SAVING_TIME_INTERVAL * CORRECTED_USB_FREQUENCY)
+            # Calculate other parameters
+            callbacks_per_buffer = int(BUFFER_SAVING_TIME_INTERVAL * DAQ_USB_TRANSFER_FREQUENCY)
             plot_buffer_size = ((task["SAMPLE_RATE"] * TimeWindowLength) // samples_per_callback) * samples_per_callback
 
             self.ACQUISITION_PARAMS[task["NAME"]] = {
                 'SAMPLES_PER_CALLBACK': samples_per_callback,
                 'BUFFER_SIZE': samples_per_callback * callbacks_per_buffer,
-                'PLOT_BUFFER_SIZE': plot_buffer_size
+                'PLOT_BUFFER_SIZE': plot_buffer_size,
+                'INTERNAL_BUFFER_SIZE': internal_buffer_size,
             }
 
         self.DAQ_TASKS = DAQ_TASKS
+        self.DAQ_TASKS_METADATA = copy.deepcopy(DAQ_TASKS)
         
         self.automatic_mode = automatic_mode
         self.error_flag = False
@@ -261,7 +307,26 @@ class AcquisitionProgram(QWidget):
         # Set the layout
         self.tree = ParameterTree()
         self.tree.setParameters(self.signal_selector, showTop=True)
+
+        # Button to open experiment defaults editor (in separate dialog)
+        self.edit_defaults_button = QPushButton("Edit Experiment Parameters")
+        self.edit_defaults_button.clicked.connect(self.open_defaults_dialog)
+
+        # Build the hidden Parameter group (not shown until dialog opens)
+        children = []
+        for col, meta in self.METADATA_COLUMNS.items():
+            if col in ('Date', 'ReadingTime (s)'):
+                continue  # Auto-generated and must not be editable in the dialog.
+            ptype = meta.get('type', 'str')
+            if ptype not in ('str', 'int', 'float', 'bool', 'list'):
+                ptype = 'str'
+            children.append({'name': col, 'type': ptype, 'value': meta.get('default', '')})
+
+        self.metadata_param_tree = Parameter.create(name='ExperimentDefaults', type='group', children=children)
+
+        # Add widgets to the layout (sorted from top to bottom)
         self.layout.addWidget(self.tree)
+        self.layout.addWidget(self.edit_defaults_button)
         self.layout.addWidget(self.button)
         self.layout.addWidget(self.plot_widget)
         self.layout.addLayout(self.duration)
@@ -338,6 +403,7 @@ class AcquisitionProgram(QWidget):
 
         if not self.error_flag:
             self.remaining_seconds = self.timer_spinbox.value()
+            self.measure_time = self.timer_spinbox.value()
             self.countdown_display.setText(f"Remaining time: {self.remaining_seconds} s")
             self.measurement_timer.start(1000)  # 1 sec
             self.should_save_data = False
@@ -379,9 +445,12 @@ class AcquisitionProgram(QWidget):
                 else:
                     self.motor_file = ""
 
-                self.add_experiment_row()
+                # Save the metadata
+                experiment_metadata = self._build_experiment_metadata()
+                error_code = self.save_metadata(experiment_metadata)
 
-                print("Experiment ended succesfully!")
+                if error_code == 0:
+                    print("Experiment ended succesfully!")
             else:
                 print("Experiment interrupted.")
 
@@ -459,160 +528,239 @@ class AcquisitionProgram(QWidget):
 
             self.dev_comunicator.start_acquisition_signal.emit()
 
-    def add_experiment_row(self, base_filename="Experiments"):
-        """
-        Search for Experiments file (.xlsx or .ods) in the directory
-        and append a new experiment row depending on its format.
-        """
-        folder_path = os.path.dirname(self.local_path[0])
-        xlsx_path = os.path.join(folder_path, f"{base_filename}.xlsx")
-        ods_path = os.path.join(folder_path, f"{base_filename}.ods")
-
-        if os.path.isfile(xlsx_path):
-            file_path = xlsx_path
-            file_type = "excel"
-        elif os.path.isfile(ods_path):
-            file_path = ods_path
-            file_type = "openoffice"
-        else:
-            print(
-                f"Could not save the experiment row. Neither {base_filename}.xlsx nor {base_filename}.ods were found.")
+    def open_defaults_dialog(self):
+        """Open a modal dialog to edit experiment default values (save or cancel)."""
+        if not hasattr(self, 'metadata_param_tree') or self.metadata_param_tree is None:
+            print("Experiment defaults schema unavailable.")
             return
 
-        # Read the string and tell Python what each number represents
-        # %d = day, %m = month, %Y = year (4 digits), %H = hour, %M = minute, %S = second
-        date_object = datetime.strptime(self.date_now, "%d%m%Y_%H%M%S")
+        # Backup current values
+        orig = {}
+        for col in list(self.METADATA_COLUMNS.keys()):
+            if col in ('Date', 'ReadingTime (s)'):
+                continue
+            try:
+                p = self.metadata_param_tree.param(col)
+                orig[col] = p.value() if p is not None else None
+            except Exception:
+                orig[col] = None
 
-        # Extract from the date the day, month, year
-        date_time = date_object.date()
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Edit Experiment Defaults")
+        dlg_layout = QVBoxLayout(dlg)
 
-        # Try to convert the rload_id to integer:
+        tree = ParameterTree()
+        tree.setParameters(self.metadata_param_tree, showTop=True)
+        dlg_layout.addWidget(tree)
+
+        btn_layout = QHBoxLayout()
+        btn_save = QPushButton("Save")
+        btn_cancel = QPushButton("Cancel")
+        btn_layout.addWidget(btn_save)
+        btn_layout.addWidget(btn_cancel)
+        dlg_layout.addLayout(btn_layout)
+
+        def on_cancel():
+            # restore originals
+            for col, val in orig.items():
+                try:
+                    p = self.metadata_param_tree.param(col)
+                    if p is not None:
+                        p.setValue(val)
+                except Exception:
+                    pass
+            dlg.reject()
+
+        def on_save():
+            dlg.accept()
+
+        btn_cancel.clicked.connect(on_cancel)
+        btn_save.clicked.connect(on_save)
+
+        dlg.exec_()
+
+    def _build_experiment_metadata(self):
+        """Build the experiment metadata split into Excel and JSON payloads."""
         try:
-            rload_id = int(self.rload_id)
-        except:
-            rload_id = self.rload_id
+            date_value = datetime.strptime(self.date_now, "%d%m%Y_%H%M%S").date()
+        except Exception:
+            date_value = self.date_now
 
-        # 1. Calculamos el camino relativo desde el Excel hasta la carpeta destino
-        ruta_relativa = os.path.relpath(self.local_path[0], start=self.exp_dir)
+        excel_metadata = {}
 
-        # 2. TRUCO VITAL: Los hipervínculos en Excel y ODS requieren barras diagonales (/)
-        # incluso en Windows. Si no haces esto, el enlace fallará al hacer clic.
-        enlace_seguro = ruta_relativa.replace('\\', '/')
+        # Generate the Excel metadata dictionary
+        for col in self.METADATA_COLUMNS.keys():
+            if col == 'Date':
+                excel_metadata[col] = date_value  # always auto-generated, must be the third column
+                continue
 
-        # 2. Prepare the common new row data
-        new_row = [
-                      f"{self.tribu_id}-{self.rload_id}",
-                      self.tribu_id,
-                      date_time,
-                      self.exp_id,
-                      "none",
-                      rload_id
-                  ] + [""] * 23
+            if col == 'ReadingTime (s)':
+                excel_metadata[col] = self.measure_time  # determined by software
+                continue
 
-        # 3. Process according to file type
-        if file_type == "excel":
-            self._add_to_excel(file_path, new_row)
-        elif file_type == "openoffice":
-            self._add_to_ods(file_path, new_row)
+            param = self.metadata_param_tree.param(col)
+            if param is not None:
+                val = param.value()
+            else:
+                val = None
 
-    def _add_to_excel(self, file_path, new_row):
-        """Helper method to handle .xlsx files using openpyxl."""
+            excel_metadata[col] = val
+
+        json_metadata = {
+            "ExperimentId": self.exp_id,
+            "RaspberryConnected": self.dev_comunicator.is_rb_connected,
+            "DAQTasks": _normalize_daq_tasks_for_json(self.DAQ_TASKS_METADATA),
+        }
+
+        return {
+            "excel_metadata": excel_metadata,
+            "json_metadata": json_metadata,
+        }
+
+    def _normalize_cell_value(self, value):
+        if isinstance(value, (dict, list, tuple)):
+            return json.dumps(value)
+        return value
+
+    def _set_column_widths(self, ws):
+        """Set column widths and style headers for better readability in Excel."""
+        from openpyxl.utils import get_column_letter
+        # Define header styling: light blue background with white text
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF")
+        header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        
+        for col_idx, header in enumerate(list(self.METADATA_COLUMNS.keys()), start=1):
+            col_letter = get_column_letter(col_idx)
+            # Set width based on header length, with a minimum of 15 and maximum of 50
+            width = max(15, min(len(header) + 3, 50))
+            ws.column_dimensions[col_letter].width = width
+            
+            # Apply header styling to the first row
+            header_cell = ws.cell(row=1, column=col_idx)
+            header_cell.fill = header_fill
+            header_cell.font = header_font
+            header_cell.alignment = header_alignment
+
+        # Set a fixed row height for consistency
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+            ws.row_dimensions[row[0].row].height = 15
+
+    def _apply_center_alignment(self, ws):
+        """Apply center alignment to all data cells in the worksheet (excluding header row)."""
+        center_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+        # Start from row 2 to skip the header row
+        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+            for cell in row:
+                cell.alignment = center_alignment
+
+    def _ensure_experiment_workbook(self, file_path):
+        """Create or normalize the workbook so it contains exactly the metadata columns."""
+        if not os.path.isfile(file_path):
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "MetadataSheet"
+            for col_idx, header in enumerate(list(self.METADATA_COLUMNS.keys()), start=1):
+                ws.cell(row=1, column=col_idx, value=header)
+            # Set column widths and apply center alignment
+            self._set_column_widths(ws)
+            self._apply_center_alignment(ws)
+            wb.save(file_path)
+            return
+
         wb = load_workbook(file_path)
         ws = wb.active
+        existing_headers = [ws.cell(row=1, column=col).value for col in range(1, ws.max_column + 1)]
+        existing_headers = [str(h).strip() for h in existing_headers if h not in (None, "")]
 
-        if not ws.tables:
-            print(f"Could not save the experiment row because the Excel file {file_path} has no tables.")
+        if existing_headers == list(self.METADATA_COLUMNS.keys()):
             return
 
-        table_name = list(ws.tables.keys())[0]
-        table = ws.tables[table_name]
-        start_cell, end_cell = table.ref.split(":")
+        # Rebuild the workbook to enforce the exact ODS schema.
+        rows = []
+        header_map = {header: idx + 1 for idx, header in enumerate(existing_headers)}
+        for row_idx in range(2, ws.max_row + 1):
+            row_data = {}
+            for header in existing_headers:
+                col_idx = header_map[header]
+                row_data[header] = ws.cell(row=row_idx, column=col_idx).value
+            rows.append(row_data)
 
-        start_col = "".join(filter(str.isalpha, start_cell))
-        start_row = int("".join(filter(str.isdigit, start_cell)))
-        end_col = "".join(filter(str.isalpha, end_cell))
-        end_row = int("".join(filter(str.isdigit, end_cell)))
+        new_wb = Workbook()
+        new_ws = new_wb.active
+        new_ws.title = "MetadataSheet"
+        for col_idx, header in enumerate(list(self.METADATA_COLUMNS.keys()), start=1):
+            new_ws.cell(row=1, column=col_idx, value=header)
+        for row_idx, row_data in enumerate(rows, start=2):
+            for col_idx, header in enumerate(self.METADATA_COLUMNS, start=1):
+                new_ws.cell(row=row_idx, column=col_idx, value=row_data.get(header, ""))
+        # Set column widths and apply center alignment
+        self._set_column_widths(new_ws)
+        self._apply_center_alignment(new_ws)
+        new_wb.save(file_path)
 
-        start_col_idx = column_index_from_string(start_col)
-        end_col_idx = column_index_from_string(end_col)
+    def save_metadata(self, experiment_data, base_filename="Experiments"):
+        """Create/update Experiments.xlsx schema and append one row from input dictionary, and creates a JSON File"""
+        if not isinstance(experiment_data, dict) or not experiment_data:
+            print(f"\033[91mCould not save experiment row: experiment_data must be a non-empty dictionary. \033[0m")
+            return 1
 
-        # Find the first empty row
-        for row_idx in range(start_row, end_row + 1):
-            row_cells = ws[row_idx]
-            if all(cell.value in (None, "") for cell in row_cells[start_col_idx - 1:end_col_idx]):
-                first_empty_row = row_idx
-                break
-        else:
-            first_empty_row = end_row + 1
+        excel_metadata = experiment_data.get("excel_metadata")
+        json_metadata = experiment_data.get("json_metadata")
 
-        # Insert the new row
-        for i, value in enumerate(new_row, start=start_col_idx):
-            new_cell = ws.cell(row=first_empty_row, column=i, value=value)
+        if not isinstance(excel_metadata, dict) or not isinstance(json_metadata, dict):
+            print(f"\033[91mCould not save experiment row: experiment_data must contain 'excel_metadata' and 'json_metadata' dictionaries. \033[0m")
+            return 1
 
-            # Copy the format of the upper row (if this is not the first row)
-            if first_empty_row > 1:
-                old_cell = ws.cell(row=first_empty_row - 1, column=i)
+        folder_path = os.path.dirname(self.local_path[0])
+        if not folder_path:
+            print(f"\033[91mCould not save experiment row: invalid experiment folder path. \033[0m")
+            return 1
 
-                new_cell.font = copy(old_cell.font)
-                new_cell.border = copy(old_cell.border)
-                new_cell.fill = copy(old_cell.fill)
-                new_cell.number_format = copy(old_cell.number_format)
-                new_cell.alignment = copy(old_cell.alignment)
+        os.makedirs(folder_path, exist_ok=True)
+        file_path = os.path.join(folder_path, f"{base_filename}.xlsx")
+        json_path = os.path.join(self.local_path[0], "experiment_metadata.json")
 
-        # Update the table range
-        new_end_row = max(end_row, first_empty_row)
-        if new_end_row != end_row:
-            table.ref = f"{start_col}{start_row}:{end_col}{new_end_row}"
+        error_code = 0
 
-        wb.save(file_path)
+        try:
+            # Save Excel row
+            self._ensure_experiment_workbook(file_path)
+            wb = load_workbook(file_path)
+            ws = wb.active
 
-    def _add_to_ods(self, file_path, new_row):
-        """Helper method to handle .ods files using ezodf."""
-        doc = ezodf.opendoc(file_path)
-        sheet = doc.sheets[0]
+            header_to_col = {header: idx + 1 for idx, header in enumerate(self.METADATA_COLUMNS)}
+            write_row = ws.max_row + 1
 
-        # Find the first empty row
-        first_empty_row = None
-        for row_idx, row in enumerate(sheet.rows()):
-            if all(cell.value is None or str(cell.value).strip() == "" for cell in row):
-                first_empty_row = row_idx
-                break
+            sheet_row = {}
+            for header in list(self.METADATA_COLUMNS.keys()):
+                default = self.METADATA_COLUMNS.get(header, {}).get('default', "")
+                val = excel_metadata.get(header, default)
+                sheet_row[header] = self._normalize_cell_value(val)
 
-        # If no empty row is found, append a new structural row at the end
-        if first_empty_row is None:
-            first_empty_row = sheet.nrows()
-            sheet.append_rows(1)
+            for header, value in sheet_row.items():
+                ws.cell(row=write_row, column=header_to_col[header], value=value)
 
-        # Insert the new data cell by cell and copy style
-        for col_idx, value in enumerate(new_row):
-            # Add columns structurally if needed
-            if col_idx >= sheet.ncols():
-                sheet.append_columns(1)
+            # Set column widths and apply center alignment
+            self._set_column_widths(ws)
+            self._apply_center_alignment(ws)
 
-            # Select objective cell
-            new_cell = sheet[first_empty_row, col_idx]
+            # Save Excel File
+            wb.save(file_path)
 
-            # Insert the value
-            if value != "":
-                new_cell.set_value(value)
+        except Exception as e:
+            print(f"\033[91mCould not save experiment row in {file_path}: {e} \033[0m")
+            error_code = 1
 
-            # Copy style from upper cell
-            if first_empty_row > 0:
-                old_cell = sheet[first_empty_row - 1, col_idx]
-                if old_cell.style_name is not None:  # Default format is None
-                    new_cell.style_name = old_cell.style_name
+        try:
+            # Save JSON File
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(json_metadata, f, ensure_ascii=False, indent=2, default=str)
+        except Exception as e:
+            print(f"\033[91mCould not JSON File in {json_path}: {e} \033[0m")
+            error_code = 1
 
-            if col_idx == 2:
-                # Force the format of the data
-                new_cell.set_value(value, value_type="date")
-
-            if col_idx == 3:
-                new_cell.formula = f'of:=HYPERLINK("{self.exp_id}/"; "{self.exp_id}")'
-                new_cell.style_name = "Hyperlink"
-
-        # Save the OpenDocument
-        doc.backup = False
-        doc.save()
+        return error_code
 
     def closeEvent(self, event):
 
@@ -661,7 +809,7 @@ class AcquisitionProgram(QWidget):
 
         if self.mainWindowParamGroups:
             for param_group in self.mainWindowParamGroups.values():
-                set_group_readonly(param_group, readonly=False)
+                _set_group_readonly(param_group, readonly=False)
 
 
         # Use the accept() method of the class QCloseEvent to close the QWidget (if not desired use the ignore() method)
@@ -709,6 +857,27 @@ if __name__ == '__main__':
         }
     ]
 
+    METADATA_COLUMNS = {
+        "TribuId": {"default": "Nylon6-PDMS", "type": "str", "limits": None},
+        "Keithley Used": {"default": False, "type": "bool", "limits": None},
+        "Date": {"default": None, "type": "date", "limits": None},
+        "Capacitorld": {"default": "none", "type": "str", "limits": None},
+        "RloadId": {"default": "R100", "type": "str", "limits": None},
+        "InitialPosition": {"default": -54.0, "type": "float", "limits": None},
+        "FinalPosition": {"default": -59.4, "type": "float", "limits": None},
+        "MeasuredParameterMotor": {"default": "Pos(mm), F(N), Target Force(N)", "type": "str", "limits": None},
+        "ReadingTime (s)": {"default": 0, "type": "int", "limits": [0, None]},
+        "Electrode rGO": {"default": False, "type": "bool", "limits": None},
+        "MotorSpeedDown(m/s)": {"default": 0.5, "type": "float", "limits": None},
+        "MotorAccelerationDown(m/s)": {"default": 0.5, "type": "float", "limits": None},
+        "MotorDecelerationDown(m/s)": {"default": 0.5, "type": "float", "limits": None},
+        "Motor Speed Up(m/s)": {"default": 0.5, "type": "float", "limits": None},
+        "Motor AccelerationUp(m/s)": {"default": 0.5, "type": "float", "limits": None},
+        "MotorDecelerationUp(m/s)": {"default": 0.5, "type": "float", "limits": None},
+        "MotorForceMax": {"default": 0.0, "type": "float", "limits": None},
+        "Notes": {"default": "", "type": "str", "limits": None},
+    }
+
     resistance_list = [{'VALUE': 5,
                       'ATENUATION': 1.0,
                       'DAQ_CODE': [0, 0, 0, 0, 0, 1],
@@ -739,7 +908,8 @@ if __name__ == '__main__':
         tribu_id = None
         rload_id = None
 
-    window = AcquisitionProgram(DAQ_TASKS,
+    window = AcquisitionProgram(DAQ_TASKS=DAQ_TASKS,
+                                METADATA_COLUMNS=METADATA_COLUMNS,
                                 automatic_mode=False,
                                 RESISTANCE_DATA=resistance_list,
                                 measure_time=1,
