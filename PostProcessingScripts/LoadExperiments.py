@@ -11,7 +11,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from scipy.signal import peak_widths
 from scipy.integrate import simpson as simps
 from openpyxl.utils import get_column_letter
-from MyLoadData import LoadFiles
+from LoadData import LoadFiles
 
 
 # %% --------------------------------------------------------------------------

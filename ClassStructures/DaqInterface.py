@@ -74,6 +74,9 @@ class AnalogRead(DAQTaskBase):
         # Determine buffer data type
         self.data = np.empty((self.SAMPLES_PER_CALLBACK, self.number_channels), dtype=np.float64)
 
+        # Set the type of task
+        self.task_type = "analog"
+
     def EveryNCallback(self):
         try:
             samples_read = c_int32()
@@ -163,6 +166,9 @@ class DigitalRead(DAQTaskBase):
 
         # Determine buffer data type
         self.data = np.empty((self.SAMPLES_PER_CALLBACK, self.number_channels), dtype=np.uint32)
+
+        # Set the type of task
+        self.task_type = "digital"
 
     def EveryNCallback(self):
         try:

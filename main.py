@@ -10,11 +10,11 @@ from pyqtgraph.parametertree import ParameterTree
 import sys
 
 # Importing custom classes and functions
-from ReadExcel import read_excel
+from utils.ReadExcel import read_excel
 from TreeStructures.ResistancePanel import ResistancePanel
 from TreeStructures.LinMotControl import LinMotControl
 from TreeStructures.RecordingParameters import RecordingParameters
-from MeasurementCore import AcquisitionProgram
+from ClassStructures.MeasurementCore import AcquisitionProgram
 from ClassStructures.DaqInterface import DigitalOutputTask_MultipleChannels, DigitalOutputTask
 
 from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Diff,

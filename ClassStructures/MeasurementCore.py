@@ -1,20 +1,14 @@
 import os
-import sys
 import shutil
 import copy
-import json
 import numpy as np
-import pyqtgraph as pg
 from datetime import datetime
-from openpyxl import load_workbook, Workbook
-from openpyxl.styles import Alignment, PatternFill, Font
-from PyQt5.QtWidgets import (QApplication, QPushButton, QVBoxLayout, QWidget,
-                             QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog, QDialog)
+from PyQt5.QtWidgets import (QPushButton, QVBoxLayout, QWidget,
+                             QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog, QComboBox, QGroupBox)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, pyqtSlot
-from MyMerger import CSV_merge
-from pyqtgraph.parametertree import Parameter, ParameterTree
-from ClassStructures.BufferProcessorClass import BufferProcessor
-from ClassStructures.DeviceCommunicatorClass import DeviceCommunicator
+from utils.ImportantFunctions import CSV_merge
+from ClassStructures.BufferProcessor import BufferProcessor
+from ClassStructures.DeviceCommunicator import DeviceCommunicator
 
 from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Diff,
                                     DAQmx_Val_Rising, DAQmx_Val_ContSamps,
@@ -52,22 +46,6 @@ def _find_divisors(n):
             divisors.add(n // i)
     return sorted(divisors)
 
-def _normalize_port_config(value):
-    """Convert DAQmx port config constants to their symbolic names for JSON output."""
-    if value == DAQmx_Val_Diff:
-        return "DAQmx_Val_Diff"
-    if value == DAQmx_Val_RSE:
-        return "DAQmx_Val_RSE"
-    return value
-
-def _normalize_daq_tasks_for_json(DAQ_TASKS_METADATA):
-    """Return a JSON-friendly deep copy of DAQ task definitions."""
-    for task in DAQ_TASKS_METADATA:
-        for channel in task.get("DAQ_CHANNELS", {}).values():
-            if isinstance(channel, dict) and "port_config" in channel:
-                channel["port_config"] = _normalize_port_config(channel["port_config"])
-    return DAQ_TASKS_METADATA
-
 def _set_group_readonly(group, readonly=True):
     group.setReadonly(readonly)
     for child in group.children():
@@ -75,6 +53,11 @@ def _set_group_readonly(group, readonly=True):
             _set_group_readonly(child, readonly)
         else:
             child.setReadonly(readonly)
+
+
+class ChannelSelectorComboBox(QComboBox):
+    def value(self):
+        return self.currentData()
 
 # ---------------- INTERFACE AND PLOT  ----------------
 class AcquisitionProgram(QWidget):
@@ -85,7 +68,7 @@ class AcquisitionProgram(QWidget):
     update_button_signal = pyqtSignal()
     
     def __init__(self,
-                 DAQ_TASKS,
+                 DAQ_PROFILES,
                  METADATA_COLUMNS,
                  automatic_mode=False,
                  RESISTANCE_DATA=None,
@@ -112,14 +95,39 @@ class AcquisitionProgram(QWidget):
         super().__init__(parent)
         self.setWindowTitle("DAQ Viewer")
         self.layout = QVBoxLayout(self)
-        
+        self.setMinimumSize(1180, 760)
+        self.layout.setContentsMargins(16, 16, 16, 16)
+        self.layout.setSpacing(12)
+        self.setStyleSheet("""
+            QWidget { background: #f5f7fb; color: #1f2937; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; }
+            QLabel#TitleLabel { font-size: 22px; font-weight: 700; color: #0f172a; }
+            QLabel#ProfileLabel { font-size: 16px; font-weight: 700; color: #0f172a; }
+            QLabel#SectionHint { color: #64748b; font-size: 11px; }
+            QGroupBox { background: #ffffff; border: 1px solid #d7dde8; border-radius: 10px; margin-top: 12px; padding-top: 10px; font-size: 13px; font-weight: 600; color: #334155; }
+            QGroupBox#PlotBox { background: #111827; border: 1px solid #1f2937; border-radius: 10px; margin-top: 12px; padding-top: 0px; font-size: 13px; font-weight: 600; color: #e5e7eb; }
+            QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #334155; }
+            QGroupBox#PlotBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #e5e7eb; }
+            QPushButton { background: #e2e8f0; border: 1px solid #cbd5e1; border-radius: 8px; padding: 7px 12px; min-height: 18px; font-size: 13px; }
+            QPushButton:hover { background: #dbeafe; border-color: #93c5fd; }
+            QPushButton:pressed { background: #bfdbfe; }
+            QPushButton#primaryAction { background: #2563eb; color: white; border-color: #1d4ed8; font-weight: 600; }
+            QPushButton#primaryAction:hover { background: #1d4ed8; }
+            QComboBox { background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 5px 10px; min-height: 24px; font-size: 13px; }
+            QComboBox::drop-down { border: 0; width: 24px; }
+        """)
+
         # Define the moveLinmot bool: 
         # We use a list because a bool is not referenced when passed as an argument
         self.moveLinMot = [False]
         self.xRecording = [False]
         self.LinMotTriggerTask = LinMotTriggerTask
         self.RelayCodeTask = RelayCodeTask
-        
+        self.LinMotTriggerLine = LinMotTriggerLine
+        self.PrepareRaspberryLine = PrepareRaspberryLine
+        self.RaspberryStatus_0_Line = RaspberryStatus_0_Line
+        self.RaspberryStatus_1_Line = RaspberryStatus_1_Line
+        self.RelayCodeLines = RelayCodeLines
+
         # ---------------- CONFIG ----------------
 
         # DAQ acquisition parameters
@@ -129,12 +137,19 @@ class AcquisitionProgram(QWidget):
         self.METADATA_COLUMNS = METADATA_COLUMNS
         self.measure_time = measure_time
 
+        # Initialize DAQ profiles from provided mapping (profile_name -> list of DAQ task dicts)
+        if not isinstance(DAQ_PROFILES, dict) or not DAQ_PROFILES:
+            raise ValueError("DAQ_PROFILES must be a non-empty dict mapping profile names to DAQ task lists")
+        self.daq_profiles = copy.deepcopy(DAQ_PROFILES)
+        self.active_daq_profile_name = "Default" if "Default" in self.daq_profiles else next(iter(self.daq_profiles.keys()))
+        initial_tasks = copy.deepcopy(self.daq_profiles[self.active_daq_profile_name])
+
         # Plot parameters
         self.TimeWindowLength = TimeWindowLength
         self.refresh_rate = int((1 / ScreenRefreshFrequency * 1000))  # Convert to milliseconds for QTimer
 
-        # Calculate buffer sizes for each DAQ Task
-        for task in DAQ_TASKS:
+        # Calculate buffer sizes for each DAQ Task (from active profile)
+        for task in initial_tasks:
             # Get internal DAQ buffer size based on total sampling rate
             internal_buffer_size = _get_daq_internal_buffer_size(task["SAMPLE_RATE"])
 
@@ -164,9 +179,9 @@ class AcquisitionProgram(QWidget):
                 'INTERNAL_BUFFER_SIZE': internal_buffer_size,
             }
 
-        self.DAQ_TASKS = DAQ_TASKS
-        self.DAQ_TASKS_METADATA = copy.deepcopy(DAQ_TASKS)
-        
+        self.DAQ_TASKS = initial_tasks
+        self.DAQ_TASKS_METADATA = copy.deepcopy(initial_tasks)
+
         self.automatic_mode = automatic_mode
         self.error_flag = False
         self.RESISTANCE_DATA = RESISTANCE_DATA
@@ -181,7 +196,7 @@ class AcquisitionProgram(QWidget):
         self.local_path = [""]
 
         # The order of definition is the order of saving into buffer, so we introduce an index to know the position:
-        for task in DAQ_TASKS:
+        for task in self.DAQ_TASKS:
             for idx, (name, config) in enumerate(task["DAQ_CHANNELS"].items()):
                 task["DAQ_CHANNELS"][name] = [config, idx]
 
@@ -223,13 +238,11 @@ class AcquisitionProgram(QWidget):
         else:
             self.rload_id = None
 
-        # Define the plot widget
-        self.plot_widget = pg.PlotWidget()
-        self.curve = self.plot_widget.plot([], pen='y')
-        self.display_data = np.array([], dtype=np.float64)
+        ### ---------------- UI ELEMENTS ---------------- ###
 
         # Acquisition control button:
         self.button = QPushButton("START LinMot")
+        self.button.setObjectName("primaryAction")
         self.button.clicked.connect(self.trigger_acquisition)
         
         # Timer UI elements
@@ -294,68 +307,78 @@ class AcquisitionProgram(QWidget):
         for n, task in enumerate(self.DAQ_TASKS):
             for channel in task["DAQ_CHANNELS"].keys():
                 task["DAQ_CHANNELS"][channel].insert(-1, self.dev_comunicator.AcquisitionTasks[n])
-            total_tasks = total_tasks | task["DAQ_CHANNELS"]
+            for channel_name, channel_value in task["DAQ_CHANNELS"].items():
+                total_tasks[f"{task['NAME']} - {channel_name}"] = channel_value
 
         # Signal Selector
-        self.signal_selector = Parameter.create(name='Signal', type='list', limits=total_tasks)
-        self.signal_selector.sigValueChanged.connect(self._update_DAQ_Plot_Buffer)
+        self.signal_selector = ChannelSelectorComboBox()
+        self.signal_selector.setToolTip("Select the channel to display")
+        self._populate_signal_selector(total_tasks)
+        self.signal_selector.currentIndexChanged.connect(self._update_DAQ_Plot_Buffer)
 
         # Now we can assign the signal selector to the DAQs:
         for task in self.dev_comunicator.AcquisitionTasks:
             task.data_column_selector = self.signal_selector
 
-        # Set the layout
-        self.tree = ParameterTree()
-        self.tree.setParameters(self.signal_selector, showTop=True)
-
         # Button to open experiment defaults editor (in separate dialog)
         self.edit_defaults_button = QPushButton("Edit Experiment Parameters")
         self.edit_defaults_button.clicked.connect(self.open_defaults_dialog)
 
-        # Build the hidden Parameter group (not shown until dialog opens)
-        children = []
-        for col, meta in self.METADATA_COLUMNS.items():
-            if col in ('Date', 'ReadingTime (s)'):
-                continue  # Auto-generated and must not be editable in the dialog.
-            ptype = meta.get('type', 'str')
-            if ptype not in ('str', 'int', 'float', 'bool', 'list'):
-                ptype = 'str'
-            children.append({'name': col, 'type': ptype, 'value': meta.get('default', '')})
+        # Button to open DAQ profiles editor
+        self.edit_daq_profiles_button = QPushButton("Edit DAQ Profiles")
+        self.edit_daq_profiles_button.clicked.connect(self.open_daq_profiles_dialog)
 
-        self.metadata_param_tree = Parameter.create(name='ExperimentDefaults', type='group', children=children)
+        self.daq_profile_label = QLabel(f"Active DAQ profile: {self.active_daq_profile_name}")
+        self.daq_profile_label.setObjectName("ProfileLabel")
+
+        channel_box = QGroupBox("Channel Selection")
+        channel_layout = QVBoxLayout(channel_box)
+        channel_layout.setContentsMargins(12, 18, 12, 12)
+        channel_layout.setSpacing(6)
+        channel_layout.addWidget(self.signal_selector)
+
+        settings_box = QGroupBox("Experiment Setup")
+        settings_layout = QVBoxLayout(settings_box)
+        settings_layout.setContentsMargins(12, 18, 12, 12)
+        settings_layout.setSpacing(8)
+        settings_button_row = QHBoxLayout()
+        settings_button_row.addWidget(self.edit_defaults_button)
+        settings_button_row.addWidget(self.edit_daq_profiles_button)
+        settings_button_row.addStretch(1)
+        settings_layout.addLayout(settings_button_row)
+        settings_layout.addWidget(self.daq_profile_label)
+
+        acquisition_box = QGroupBox("Acquisition")
+        acquisition_layout = QHBoxLayout(acquisition_box)
+        acquisition_layout.setContentsMargins(12, 18, 12, 12)
+        acquisition_layout.setSpacing(12)
+        acquisition_left = QVBoxLayout()
+        acquisition_left.addWidget(self.button)
+        acquisition_left.addStretch(1)
+        acquisition_right = QVBoxLayout()
+        acquisition_right.addWidget(self.countdown_display)
+        acquisition_right.addLayout(self.duration)
+        acquisition_right.addStretch(1)
+        acquisition_layout.addLayout(acquisition_left)
+        acquisition_layout.addLayout(acquisition_right)
+
+        plot_box = QGroupBox("")
+        plot_box.setObjectName("PlotBox")
+        plot_layout = QVBoxLayout(plot_box)
+        plot_layout.setContentsMargins(12, 18, 12, 12)
+        plot_layout.addWidget(self.plot_widget)
 
         # Add widgets to the layout (sorted from top to bottom)
-        self.layout.addWidget(self.tree)
-        self.layout.addWidget(self.edit_defaults_button)
-        self.layout.addWidget(self.button)
-        self.layout.addWidget(self.plot_widget)
-        self.layout.addLayout(self.duration)
-        self.layout.addWidget(self.countdown_display)
+        self.layout.addWidget(channel_box)
+        self.layout.addWidget(settings_box)
+        self.layout.addWidget(acquisition_box)
+        self.layout.addWidget(plot_box)
+
+        self._update_DAQ_Plot_Buffer()
 
         if self.automatic_mode:
             print("Starting acquisition in automatic mode.")
             self.trigger_acquisition()
-
-    def _update_DAQ_Plot_Buffer(self, param, value):
-        # Obtain the DAQ Task Reference
-        DAQ_Task_Reference = value[1]
-
-        # Disconnect the plotter from the screen
-        self.actual_plotter = None
-
-        # Reshape the display_data buffer
-        if self.display_data.size != DAQ_Task_Reference.PLOT_BUFFER_SIZE:
-            self.display_data = np.empty(DAQ_Task_Reference.PLOT_BUFFER_SIZE, dtype=np.float64)
-
-        # Calculate the array index corresponding to the selected signal
-        self.index_pointer = self.signal_selector.value()[-1]
-
-        # Select the actual plotter
-        self.actual_plotter = DAQ_Task_Reference
-
-    def flush_screen(self):
-        self.actual_plotter = None
-        self.curve.setData([])
 
     def update_countdown(self):
 
@@ -380,23 +403,6 @@ class AcquisitionProgram(QWidget):
                 self.countdown_display.setText("Remaining time: -")
                 self.should_save_data = True
                 self.trigger_acquisition()
-    
-    def update_plot(self):
-        if self.actual_plotter is None:
-            return
-        if self.display_data.size == 0:
-            return
-
-        plot_buffer = self.actual_plotter.plot_buffer
-        plot_buffer_size = self.actual_plotter.PLOT_BUFFER_SIZE
-        write_index = self.actual_plotter.write_index
-
-        tail_size = plot_buffer_size - write_index
-        self.display_data[:tail_size] = plot_buffer[write_index:, self.index_pointer]
-        self.display_data[tail_size:] = plot_buffer[:write_index, self.index_pointer]
-
-        self.curve.setData(self.display_data)
-
 
     @pyqtSlot()
     def start_acquisition_return(self):
@@ -409,7 +415,8 @@ class AcquisitionProgram(QWidget):
             self.should_save_data = False
 
             # Assign the plotter to the selected signal
-            self.actual_plotter = self.signal_selector.value()[-2]
+            selected = self.signal_selector.value()
+            self.actual_plotter = selected[-2] if selected else None
 
             self.update_button()
             print("The acquisition has started successfully!")
@@ -528,253 +535,6 @@ class AcquisitionProgram(QWidget):
 
             self.dev_comunicator.start_acquisition_signal.emit()
 
-    def open_defaults_dialog(self):
-        """Open a modal dialog to edit experiment default values (save or cancel)."""
-        if not hasattr(self, 'metadata_param_tree') or self.metadata_param_tree is None:
-            print("Experiment defaults schema unavailable.")
-            return
-
-        # Backup current values
-        orig = {}
-        for col in list(self.METADATA_COLUMNS.keys()):
-            if col in ('Date', 'ReadingTime (s)'):
-                continue
-            try:
-                p = self.metadata_param_tree.param(col)
-                orig[col] = p.value() if p is not None else None
-            except Exception:
-                orig[col] = None
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Edit Experiment Defaults")
-        dlg_layout = QVBoxLayout(dlg)
-
-        tree = ParameterTree()
-        tree.setParameters(self.metadata_param_tree, showTop=True)
-        dlg_layout.addWidget(tree)
-
-        btn_layout = QHBoxLayout()
-        btn_save = QPushButton("Save")
-        btn_cancel = QPushButton("Cancel")
-        btn_layout.addWidget(btn_save)
-        btn_layout.addWidget(btn_cancel)
-        dlg_layout.addLayout(btn_layout)
-
-        def on_cancel():
-            # restore originals
-            for col, val in orig.items():
-                try:
-                    p = self.metadata_param_tree.param(col)
-                    if p is not None:
-                        p.setValue(val)
-                except Exception:
-                    pass
-            dlg.reject()
-
-        def on_save():
-            tribu_param = self.metadata_param_tree.param('TribuId')
-            rload_param = self.metadata_param_tree.param('RloadId')
-
-            if tribu_param is not None:
-                self.tribu_id = tribu_param.value()
-            else:
-                self.tribu_id = None
-
-            if rload_param is not None:
-                self.rload_id = rload_param.value()
-            else:
-                self.rload_id = None
-
-            dlg.accept()
-
-        btn_cancel.clicked.connect(on_cancel)
-        btn_save.clicked.connect(on_save)
-
-        dlg.exec_()
-
-    def _build_experiment_metadata(self):
-        """Build the experiment metadata split into Excel and JSON payloads."""
-        try:
-            date_value = datetime.strptime(self.date_now, "%d%m%Y_%H%M%S").date()
-        except Exception:
-            date_value = self.date_now
-
-        excel_metadata = {}
-
-        # Generate the Excel metadata dictionary
-        for col in self.METADATA_COLUMNS.keys():
-            if col == 'Date':
-                excel_metadata[col] = date_value  # always auto-generated, must be the third column
-                continue
-
-            if col == 'ReadingTime (s)':
-                excel_metadata[col] = self.measure_time  # determined by software
-                continue
-
-            param = self.metadata_param_tree.param(col)
-            if param is not None:
-                val = param.value()
-            else:
-                val = None
-
-            excel_metadata[col] = val
-
-        json_metadata = {
-            "ExperimentId": self.exp_id,
-            "RaspberryConnected": self.dev_comunicator.is_rb_connected,
-            "DAQTasks": _normalize_daq_tasks_for_json(self.DAQ_TASKS_METADATA),
-        }
-
-        return {
-            "excel_metadata": excel_metadata,
-            "json_metadata": json_metadata,
-        }
-
-    def _normalize_cell_value(self, value):
-        if isinstance(value, (dict, list, tuple)):
-            return json.dumps(value)
-        return value
-
-    def _set_column_widths(self, ws):
-        """Set column widths and style headers for better readability in Excel."""
-        from openpyxl.utils import get_column_letter
-        # Define header styling: light blue background with white text
-        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        header_font = Font(bold=True, color="FFFFFF")
-        header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        
-        for col_idx, header in enumerate(list(self.METADATA_COLUMNS.keys()), start=1):
-            col_letter = get_column_letter(col_idx)
-            # Set width based on header length, with a minimum of 15 and maximum of 50
-            width = max(15, min(len(header) + 3, 50))
-            ws.column_dimensions[col_letter].width = width
-            
-            # Apply header styling to the first row
-            header_cell = ws.cell(row=1, column=col_idx)
-            header_cell.fill = header_fill
-            header_cell.font = header_font
-            header_cell.alignment = header_alignment
-
-        # Set a fixed row height for consistency
-        for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
-            ws.row_dimensions[row[0].row].height = 15
-
-    def _apply_center_alignment(self, ws):
-        """Apply center alignment to all data cells in the worksheet (excluding header row)."""
-        center_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        # Start from row 2 to skip the header row
-        for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
-            for cell in row:
-                cell.alignment = center_alignment
-
-    def _ensure_experiment_workbook(self, file_path):
-        """Create or normalize the workbook so it contains exactly the metadata columns."""
-        if not os.path.isfile(file_path):
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "MetadataSheet"
-            for col_idx, header in enumerate(list(self.METADATA_COLUMNS.keys()), start=1):
-                ws.cell(row=1, column=col_idx, value=header)
-            # Set column widths and apply center alignment
-            self._set_column_widths(ws)
-            self._apply_center_alignment(ws)
-            wb.save(file_path)
-            return
-
-        wb = load_workbook(file_path)
-        ws = wb.active
-        existing_headers = [ws.cell(row=1, column=col).value for col in range(1, ws.max_column + 1)]
-        existing_headers = [str(h).strip() for h in existing_headers if h not in (None, "")]
-
-        if existing_headers == list(self.METADATA_COLUMNS.keys()):
-            return
-
-        # Rebuild the workbook to enforce the exact ODS schema.
-        rows = []
-        header_map = {header: idx + 1 for idx, header in enumerate(existing_headers)}
-        for row_idx in range(2, ws.max_row + 1):
-            row_data = {}
-            for header in existing_headers:
-                col_idx = header_map[header]
-                row_data[header] = ws.cell(row=row_idx, column=col_idx).value
-            rows.append(row_data)
-
-        new_wb = Workbook()
-        new_ws = new_wb.active
-        new_ws.title = "MetadataSheet"
-        for col_idx, header in enumerate(list(self.METADATA_COLUMNS.keys()), start=1):
-            new_ws.cell(row=1, column=col_idx, value=header)
-        for row_idx, row_data in enumerate(rows, start=2):
-            for col_idx, header in enumerate(self.METADATA_COLUMNS, start=1):
-                new_ws.cell(row=row_idx, column=col_idx, value=row_data.get(header, ""))
-        # Set column widths and apply center alignment
-        self._set_column_widths(new_ws)
-        self._apply_center_alignment(new_ws)
-        new_wb.save(file_path)
-
-    def save_metadata(self, experiment_data, base_filename="Experiments"):
-        """Create/update Experiments.xlsx schema and append one row from input dictionary, and creates a JSON File"""
-        if not isinstance(experiment_data, dict) or not experiment_data:
-            print(f"\033[91mCould not save experiment row: experiment_data must be a non-empty dictionary. \033[0m")
-            return 1
-
-        excel_metadata = experiment_data.get("excel_metadata")
-        json_metadata = experiment_data.get("json_metadata")
-
-        if not isinstance(excel_metadata, dict) or not isinstance(json_metadata, dict):
-            print(f"\033[91mCould not save experiment row: experiment_data must contain 'excel_metadata' and 'json_metadata' dictionaries. \033[0m")
-            return 1
-
-        folder_path = os.path.dirname(self.local_path[0])
-        if not folder_path:
-            print(f"\033[91mCould not save experiment row: invalid experiment folder path. \033[0m")
-            return 1
-
-        os.makedirs(folder_path, exist_ok=True)
-        file_path = os.path.join(folder_path, f"{base_filename}.xlsx")
-        json_path = os.path.join(self.local_path[0], "experiment_metadata.json")
-
-        error_code = 0
-
-        try:
-            # Save Excel row
-            self._ensure_experiment_workbook(file_path)
-            wb = load_workbook(file_path)
-            ws = wb.active
-
-            header_to_col = {header: idx + 1 for idx, header in enumerate(self.METADATA_COLUMNS)}
-            write_row = ws.max_row + 1
-
-            sheet_row = {}
-            for header in list(self.METADATA_COLUMNS.keys()):
-                default = self.METADATA_COLUMNS.get(header, {}).get('default', "")
-                val = excel_metadata.get(header, default)
-                sheet_row[header] = self._normalize_cell_value(val)
-
-            for header, value in sheet_row.items():
-                ws.cell(row=write_row, column=header_to_col[header], value=value)
-
-            # Set column widths and apply center alignment
-            self._set_column_widths(ws)
-            self._apply_center_alignment(ws)
-
-            # Save Excel File
-            wb.save(file_path)
-
-        except Exception as e:
-            print(f"\033[91mCould not save experiment row in {file_path}: {e} \033[0m")
-            error_code = 1
-
-        try:
-            # Save JSON File
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(json_metadata, f, ensure_ascii=False, indent=2, default=str)
-        except Exception as e:
-            print(f"\033[91mCould not JSON File in {json_path}: {e} \033[0m")
-            error_code = 1
-
-        return error_code
-
     def closeEvent(self, event):
 
         print("\nClosing DAQ Viewer")
@@ -833,101 +593,3 @@ class AcquisitionProgram(QWidget):
         if self.xClose:
             # Close the QWidget as soon as it is created adding in the event loop a QTimer event
             QTimer.singleShot(0, self.close)
-
-# ---------------- MAIN ----------------
-if __name__ == '__main__':
-
-    DAQ_TASKS = [
-        {
-            "NAME": "Dev1",
-            "SAMPLE_RATE": 10000,
-
-            "DAQ_CHANNELS":{
-                "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff, "conversion_factor": None},
-                # "Current": {"port": "Dev1/ai2", "port_config": DAQmx_Val_RSE, "conversion_factor": 1},
-            },
-
-            # "TRIGGER_SOURCE": "PFI0",
-            "TRIGGER_SOURCE": None,
-
-            "TYPE": "analog"
-        },
-
-        {
-            "NAME": "Dev2",
-            "SAMPLE_RATE": 10000,
-
-            "DAQ_CHANNELS":{
-                # "LinMot_Enable": {"port":"Dev2/ai0", "port_config":DAQmx_Val_RSE, "conversion_factor": None},
-                # "LinMot_Up_Down": {"port":"Dev2/ai1", "port_config":DAQmx_Val_RSE, "conversion_factor": None}
-                "LinMot_Enable": {"port":"Dev2/port0/line0", "port_config":None, "conversion_factor": None},
-                "LinMot_Up_Down": {"port":"Dev2/port0/line1", "port_config":None, "conversion_factor": None}
-            },
-
-            # "TRIGGER_SOURCE": "PFI0",
-            "TRIGGER_SOURCE": None,
-            "TYPE": "digital"
-        }
-    ]
-
-    METADATA_COLUMNS = {
-        "TribuId": {"default": "Nylon6-PDMS", "type": "str", "limits": None},
-        "Keithley Used": {"default": False, "type": "bool", "limits": None},
-        "Date": {"default": None, "type": "date", "limits": None},
-        "Capacitorld": {"default": "none", "type": "str", "limits": None},
-        "RloadId": {"default": "R100", "type": "str", "limits": None},
-        "InitialPosition": {"default": -54.0, "type": "float", "limits": None},
-        "FinalPosition": {"default": -59.4, "type": "float", "limits": None},
-        "MeasuredParameterMotor": {"default": "Pos(mm), F(N), Target Force(N)", "type": "str", "limits": None},
-        "ReadingTime (s)": {"default": 0, "type": "int", "limits": [0, None]},
-        "Electrode rGO": {"default": False, "type": "bool", "limits": None},
-        "MotorSpeedDown(m/s)": {"default": 0.5, "type": "float", "limits": None},
-        "MotorAccelerationDown(m/s)": {"default": 0.5, "type": "float", "limits": None},
-        "MotorDecelerationDown(m/s)": {"default": 0.5, "type": "float", "limits": None},
-        "Motor Speed Up(m/s)": {"default": 0.5, "type": "float", "limits": None},
-        "Motor AccelerationUp(m/s)": {"default": 0.5, "type": "float", "limits": None},
-        "MotorDecelerationUp(m/s)": {"default": 0.5, "type": "float", "limits": None},
-        "MotorForceMax": {"default": 0.0, "type": "float", "limits": None},
-        "Notes": {"default": "", "type": "str", "limits": None},
-    }
-
-    resistance_list = [{'VALUE': 5,
-                      'ATENUATION': 1.0,
-                      'DAQ_CODE': [0, 0, 0, 0, 0, 1],
-                      'RLOAD_ID': 'Resistance 0'},
-                     {'VALUE': 25,
-                      'ATENUATION': 1.8,
-                      'DAQ_CODE': [0, 0, 1, 0, 0, 1],
-                      'RLOAD_ID': 'Resistance 4'},
-                     {'VALUE': 35,
-                      'ATENUATION': 2.2,
-                      'DAQ_CODE': [0, 1, 1, 0, 0, 1],
-                      'RLOAD_ID': 'Resistance 6'}]
-
-    app = QApplication(sys.argv)
-
-    # To debug, use this
-    debug = True
-    tribo_lab = True
-    if debug:
-        if tribo_lab:
-            exp_dir = r"C:\Users\mmartic\Desktop\RogerTest"
-        else:
-            exp_dir = r"C:\Users\rpieres\Desktop\Test"
-        tribu_id = "PDMSvsNylon"
-        rload_id = "10"
-    else:
-        exp_dir = None
-        tribu_id = None
-        rload_id = None
-
-    window = AcquisitionProgram(DAQ_TASKS=DAQ_TASKS,
-                                METADATA_COLUMNS=METADATA_COLUMNS,
-                                automatic_mode=False,
-                                RESISTANCE_DATA=resistance_list,
-                                measure_time=1,
-                                exp_dir=exp_dir,
-                                tribu_id=tribu_id,
-                                rload_id=rload_id)
-    window.show()
-    sys.exit(app.exec_())

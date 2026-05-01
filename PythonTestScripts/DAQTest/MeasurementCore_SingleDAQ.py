@@ -18,7 +18,7 @@ from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Di
 from PyQt5.QtCore import Qt, QObject, pyqtSignal, QThread, QTimer, pyqtSlot
 from PyDAQmx import Task
 from RaspberryInterface import RaspberryInterface
-from MyMerger import Pickle_merge, CSV_merge
+from utils.ImportantFunctions import Pickle_merge, CSV_merge
 from pyqtgraph.parametertree import Parameter, ParameterTree
 
 def set_group_readonly(group, readonly=True):

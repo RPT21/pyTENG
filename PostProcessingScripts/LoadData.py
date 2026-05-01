@@ -7,7 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import tkinter as tk
 from tkinter import filedialog
-from MyMerger import merge_DAQ_data, synchronize_dataframes
+from utils.ImportantFunctions import merge_DAQ_data, synchronize_dataframes
 
 
 # %% --------------------------------------------------------------------------

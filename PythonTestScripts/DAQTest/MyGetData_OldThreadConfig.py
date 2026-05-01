@@ -18,7 +18,7 @@ from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts,
 from PyQt5.QtCore import Qt, QObject, pyqtSignal, QThread, QTimer, pyqtSlot
 from PyDAQmx import Task
 from RaspberryInterface import RaspberryInterface
-from MyMerger import Files_merge
+from utils.ImportantFunctions import Files_merge
 from pyqtgraph.parametertree import Parameter, ParameterTree
 
 # ---------------- BUFFER PROCESSING THREAD ----------------
