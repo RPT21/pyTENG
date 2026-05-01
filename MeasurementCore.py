@@ -572,6 +572,19 @@ class AcquisitionProgram(QWidget):
             dlg.reject()
 
         def on_save():
+            tribu_param = self.metadata_param_tree.param('TribuId')
+            rload_param = self.metadata_param_tree.param('RloadId')
+
+            if tribu_param is not None:
+                self.tribu_id = tribu_param.value()
+            else:
+                self.tribu_id = None
+
+            if rload_param is not None:
+                self.rload_id = rload_param.value()
+            else:
+                self.rload_id = None
+
             dlg.accept()
 
         btn_cancel.clicked.connect(on_cancel)
