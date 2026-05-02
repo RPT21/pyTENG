@@ -11,6 +11,9 @@ from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Di
 
 class MetadataInterface:
 
+    def __init__(self, mainWindowReference):
+        self.mainWindow = mainWindowReference
+
     def _normalize_port_config(self, value):
         """Convert DAQmx port config constants to their symbolic names for JSON output."""
         if value == DAQmx_Val_Diff:
@@ -27,26 +30,26 @@ class MetadataInterface:
                     channel["port_config"] = self._normalize_port_config(channel["port_config"])
         return DAQ_TASKS_METADATA
 
-    def _build_experiment_metadata(self):
+    def build_experiment_metadata(self):
         """Build the experiment metadata split into Excel and JSON payloads."""
         try:
-            date_value = datetime.strptime(self.date_now, "%d%m%Y_%H%M%S").date()
+            date_value = datetime.strptime(self.mainWindow.date_now, "%d%m%Y_%H%M%S").date()
         except Exception:
-            date_value = self.date_now
+            date_value = self.mainWindow.date_now
 
         excel_metadata = {}
 
         # Generate the Excel metadata dictionary
-        for col in self.METADATA_COLUMNS.keys():
+        for col in self.mainWindow.METADATA_COLUMNS.keys():
             if col == 'Date':
                 excel_metadata[col] = date_value  # always auto-generated, must be the third column
                 continue
 
             if col == 'ReadingTime (s)':
-                excel_metadata[col] = self.measure_time  # determined by software
+                excel_metadata[col] = self.mainWindow.measure_time  # determined by software
                 continue
 
-            param = self.metadata_param_tree.param(col)
+            param = self.mainWindow.ExpConfigWindow.metadata_param_tree.param(col)
             if param is not None:
                 val = param.value()
             else:
@@ -55,10 +58,10 @@ class MetadataInterface:
             excel_metadata[col] = val
 
         json_metadata = {
-            "ExperimentId": self.exp_id,
-            "DAQProfile": self.active_daq_profile_name,
-            "RaspberryConnected": self.dev_comunicator.is_rb_connected,
-            "DAQTasks": self._normalize_daq_tasks_for_json(self.DAQ_TASKS_METADATA),
+            "ExperimentId": self.mainWindow.exp_id,
+            "DAQProfile": self.mainWindow.active_daq_profile_name,
+            "RaspberryConnected": self.mainWindow.dev_comunicator.is_rb_connected,
+            "DAQTasks": self._normalize_daq_tasks_for_json(self.mainWindow.DAQ_TASKS_METADATA),
         }
 
         return {
@@ -79,7 +82,7 @@ class MetadataInterface:
         header_font = Font(bold=True, color="FFFFFF")
         header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
 
-        for col_idx, header in enumerate(list(self.METADATA_COLUMNS.keys()), start=1):
+        for col_idx, header in enumerate(list(self.mainWindow.METADATA_COLUMNS.keys()), start=1):
             col_letter = get_column_letter(col_idx)
             # Set width based on header length, with a minimum of 15 and maximum of 50
             width = max(15, min(len(header) + 3, 50))
@@ -109,7 +112,7 @@ class MetadataInterface:
             wb = Workbook()
             ws = wb.active
             ws.title = "MetadataSheet"
-            for col_idx, header in enumerate(list(self.METADATA_COLUMNS.keys()), start=1):
+            for col_idx, header in enumerate(list(self.mainWindow.METADATA_COLUMNS.keys()), start=1):
                 ws.cell(row=1, column=col_idx, value=header)
             # Set column widths and apply center alignment
             self._set_column_widths(ws)
@@ -122,7 +125,7 @@ class MetadataInterface:
         existing_headers = [ws.cell(row=1, column=col).value for col in range(1, ws.max_column + 1)]
         existing_headers = [str(h).strip() for h in existing_headers if h not in (None, "")]
 
-        if existing_headers == list(self.METADATA_COLUMNS.keys()):
+        if existing_headers == list(self.mainWindow.METADATA_COLUMNS.keys()):
             return
 
         # Rebuild the workbook to enforce the exact ODS schema.
@@ -138,10 +141,10 @@ class MetadataInterface:
         new_wb = Workbook()
         new_ws = new_wb.active
         new_ws.title = "MetadataSheet"
-        for col_idx, header in enumerate(list(self.METADATA_COLUMNS.keys()), start=1):
+        for col_idx, header in enumerate(list(self.mainWindow.METADATA_COLUMNS.keys()), start=1):
             new_ws.cell(row=1, column=col_idx, value=header)
         for row_idx, row_data in enumerate(rows, start=2):
-            for col_idx, header in enumerate(self.METADATA_COLUMNS, start=1):
+            for col_idx, header in enumerate(self.mainWindow.METADATA_COLUMNS, start=1):
                 new_ws.cell(row=row_idx, column=col_idx, value=row_data.get(header, ""))
         # Set column widths and apply center alignment
         self._set_column_widths(new_ws)
@@ -162,14 +165,14 @@ class MetadataInterface:
                 f"\033[91mCould not save experiment row: experiment_data must contain 'excel_metadata' and 'json_metadata' dictionaries. \033[0m")
             return 1
 
-        folder_path = os.path.dirname(self.local_path[0])
+        folder_path = os.path.dirname(self.mainWindow.local_path[0])
         if not folder_path:
             print(f"\033[91mCould not save experiment row: invalid experiment folder path. \033[0m")
             return 1
 
         os.makedirs(folder_path, exist_ok=True)
         file_path = os.path.join(folder_path, f"{base_filename}.xlsx")
-        json_path = os.path.join(self.local_path[0], "experiment_metadata.json")
+        json_path = os.path.join(self.mainWindow.local_path[0], "experiment_metadata.json")
 
         error_code = 0
 
@@ -179,12 +182,12 @@ class MetadataInterface:
             wb = load_workbook(file_path)
             ws = wb.active
 
-            header_to_col = {header: idx + 1 for idx, header in enumerate(self.METADATA_COLUMNS)}
+            header_to_col = {header: idx + 1 for idx, header in enumerate(self.mainWindow.METADATA_COLUMNS)}
             write_row = ws.max_row + 1
 
             sheet_row = {}
-            for header in list(self.METADATA_COLUMNS.keys()):
-                default = self.METADATA_COLUMNS.get(header, {}).get('default', "")
+            for header in list(self.mainWindow.METADATA_COLUMNS.keys()):
+                default = self.mainWindow.METADATA_COLUMNS.get(header, {}).get('default', "")
                 val = excel_metadata.get(header, default)
                 sheet_row[header] = self._normalize_cell_value(val)
 

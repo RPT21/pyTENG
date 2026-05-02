@@ -1,10 +1,56 @@
 import pyqtgraph as pg
 import numpy as np
 from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import QComboBox
+
+class ChannelSelectorComboBox(QComboBox):
+
+    def __init__(self, DAQ_TASKS, AcquisitionGraphReference):
+        super().__init__()
+
+        # Generate a dictionary with all channels and corresponding tasks
+        self.ALL_CHANNELS = {}
+        for n, task in enumerate(DAQ_TASKS):
+            for channel_name, channel_value in task["DAQ_CHANNELS"].items():
+                self.ALL_CHANNELS[f"{task['NAME']} - {channel_name}"] = [channel_value[-1], task["DAQ_TASK_REFERENCE"]]
+
+        # Create the channel display list
+        self._populate_signal_selector(self.ALL_CHANNELS)
+        self.setToolTip("Select the channel to display")
+
+        # Connect with the Acquisition Graph
+        self.AcquisitionGraphReference = AcquisitionGraphReference
+        self.currentIndexChanged.connect(AcquisitionGraphReference.update_DAQ_Plot_Buffer)
+        self.AcquisitionGraphReference.signal_selector = self
+
+    def value(self):
+        return self.currentData()
+
+    def _populate_signal_selector(self, total_tasks, preferred_label=None):
+        current_label = preferred_label or self.currentText()
+        self.blockSignals(True)
+        self.clear()
+
+        for label, channel_value in total_tasks.items():
+            self.addItem(label, channel_value)
+
+        if current_label:
+            idx = self.findText(current_label)
+            if idx >= 0:
+                self.setCurrentIndex(idx)
+            elif self.count() > 0:
+                self.setCurrentIndex(0)
+        elif self.count() > 0:
+            self.setCurrentIndex(0)
+
+        self.blockSignals(False)
 
 class AcquisitionGraph(pg.PlotWidget):
-    def __init__(self, parent=None):
+    def __init__(self, TimeWindowLength, parent=None):
         super(AcquisitionGraph, self).__init__(parent)
+
+        self.TimeWindowLength = TimeWindowLength
+        self.signal_selector = None
 
         self.setLabel('left', 'Amplitude', units='V', color='#e5e7eb', size='11pt', autoSIPrefix=False)
         self.setLabel('bottom', 'Time', units='s', color='#e5e7eb', size='11pt', autoSIPrefix=False)
@@ -24,7 +70,7 @@ class AcquisitionGraph(pg.PlotWidget):
         self.setXRange(0, self.TimeWindowLength)
 
 
-    def _update_DAQ_Plot_Buffer(self, *args):
+    def update_DAQ_Plot_Buffer(self, *args):
         selected = self.signal_selector.value()
         if not selected:
             self.actual_plotter = None
@@ -40,17 +86,17 @@ class AcquisitionGraph(pg.PlotWidget):
         if task_type == 'analog':
             # Analog: voltage between -10 and 10
             try:
-                self.plot_widget.setYRange(-10, 10)
+                self.setYRange(-10, 10)
             except Exception:
                 pass
-            self.plot_widget.setLabel('left', 'Amplitude', units='V', color='#e5e7eb', size='11pt', autoSIPrefix=False)
+            self.setLabel('left', 'Amplitude', units='V', color='#e5e7eb', size='11pt', autoSIPrefix=False)
         else:
             # Digital: values 0 or 1, not voltage
             try:
-                self.plot_widget.setYRange(0, 1)
+                self.setYRange(0, 1)
             except Exception:
                 pass
-            self.plot_widget.setLabel('left', 'Digital signal', units='', color='#e5e7eb', size='11pt', autoSIPrefix=False)
+            self.setLabel('left', 'Digital signal', units='', color='#e5e7eb', size='11pt', autoSIPrefix=False)
 
         # Disconnect the plotter from the screen
         self.actual_plotter = None
@@ -60,7 +106,7 @@ class AcquisitionGraph(pg.PlotWidget):
             self.display_data = np.empty(DAQ_Task_Reference.PLOT_BUFFER_SIZE, dtype=np.float64)
 
         # Calculate the array index corresponding to the selected signal
-        self.index_pointer = selected[-1]
+        self.index_pointer = selected[0]
 
         # Select the actual plotter
         self.actual_plotter = DAQ_Task_Reference
@@ -84,5 +130,5 @@ class AcquisitionGraph(pg.PlotWidget):
         self.display_data[tail_size:] = plot_buffer[:write_index, self.index_pointer]
 
         # Create time axis from 0 to TimeWindowLength
-        time_axis = np.linspace(0, self.TimeWindowLength, plot_buffer_size)
+        time_axis = np.linspace(0, self.TimeWindowLength, plot_buffer_size)  # S'ha de modificar que no es crei cada vegada, sino que es mantingui i només s'actualitzi si el plot_buffer_size canvia
         self.curve.setData(time_axis, self.display_data)

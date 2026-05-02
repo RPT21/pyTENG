@@ -46,30 +46,25 @@ class DeviceCommunicator(QObject):
         self.AcquisitionTasks = []
         for n, task in enumerate(self.mainWindow.DAQ_TASKS):
 
-            # Make a reference for ACQUISITION_PARAMS:
-            ACQUISITION_PARAMS = self.mainWindow.ACQUISITION_PARAMS[task["NAME"]]
-
             if task["TYPE"] == "analog":
                 self.AcquisitionTasks.append(
-                    AnalogRead(PLOT_BUFFER_SIZE=ACQUISITION_PARAMS["PLOT_BUFFER_SIZE"],
-                                    BUFFER_PROCESSOR=self.mainWindow.buffer_processors[n],
-                                    BUFFER_SIZE=ACQUISITION_PARAMS["BUFFER_SIZE"],
-                                    CHANNELS=task["DAQ_CHANNELS"],
-                                    SAMPLE_RATE=task["SAMPLE_RATE"],
-                                    SAMPLES_PER_CALLBACK=ACQUISITION_PARAMS["SAMPLES_PER_CALLBACK"],
-                                    AcquisitionProgramReference=self.mainWindow,
-                                    TRIGGER_SOURCE=task["TRIGGER_SOURCE"])
+                    AnalogRead(
+                        TASK=task,
+                        BUFFER_PROCESSOR=self.mainWindow.buffer_processors[n],
+                        DAQ_USB_TRANSFER_FREQUENCY=self.mainWindow.DAQ_USB_TRANSFER_FREQUENCY,
+                        BUFFER_SAVING_TIME_INTERVAL=self.mainWindow.BUFFER_SAVING_TIME_INTERVAL,
+                        TimeWindowLength=self.mainWindow.TimeWindowLength,
+                        AcquisitionProgramReference=self.mainWindow)
                 )
             elif task["TYPE"] == "digital":
                 self.AcquisitionTasks.append(
-                    DigitalRead(PLOT_BUFFER_SIZE=ACQUISITION_PARAMS["PLOT_BUFFER_SIZE"],
-                                    BUFFER_PROCESSOR=self.mainWindow.buffer_processors[n],
-                                    BUFFER_SIZE=ACQUISITION_PARAMS["BUFFER_SIZE"],
-                                    CHANNELS=task["DAQ_CHANNELS"],
-                                    SAMPLE_RATE=task["SAMPLE_RATE"],
-                                    SAMPLES_PER_CALLBACK=ACQUISITION_PARAMS["SAMPLES_PER_CALLBACK"],
-                                    AcquisitionProgramReference=self.mainWindow,
-                                    TRIGGER_SOURCE=task["TRIGGER_SOURCE"])
+                    DigitalRead(
+                        TASK=task,
+                        BUFFER_PROCESSOR=self.mainWindow.buffer_processors[n],
+                        DAQ_USB_TRANSFER_FREQUENCY=self.mainWindow.DAQ_USB_TRANSFER_FREQUENCY,
+                        BUFFER_SAVING_TIME_INTERVAL=self.mainWindow.BUFFER_SAVING_TIME_INTERVAL,
+                        TimeWindowLength=self.mainWindow.TimeWindowLength,
+                        AcquisitionProgramReference=self.mainWindow)
                 )
             else:
                 raise Exception("Error the task TYPE is not analog neither digital")

@@ -1,22 +1,21 @@
 from PyQt5.QtWidgets import (QPushButton, QVBoxLayout,
                              QLabel, QHBoxLayout, QInputDialog, QDialog,
                              QComboBox, QPlainTextEdit, QMessageBox)
-
-from pyqtgraph.parametertree import ParameterTree
 import copy
+import json
 
-class DAQProfilesWindow(QPushButton):
+class DAQProfilesWindow(QDialog):
 
-    def open_daq_profiles_dialog(self):
+    def __init__(self, DAQ_PROFILES, parent=None):
+
+        super().__init__(parent)
+
         """Open a modal dialog to edit, create and apply DAQ profiles."""
-        if not hasattr(self, "daq_profiles") or not self.daq_profiles:
-            print("DAQ profile storage is unavailable.")
-            return
+        self.daq_profiles = DAQ_PROFILES
 
-        dlg = QDialog(self)
-        dlg.setWindowTitle("Edit DAQ Profiles")
-        dlg.setMinimumSize(900, 600)
-        dlg.setStyleSheet("""
+        self.setWindowTitle("Edit DAQ Profiles")
+        self.setMinimumSize(900, 600)
+        self.setStyleSheet("""
             QDialog {
                 background-color: #f5f7fb;
             }
@@ -73,7 +72,7 @@ class DAQProfilesWindow(QPushButton):
             }
         """)
 
-        dlg_layout = QVBoxLayout(dlg)
+        dlg_layout = QVBoxLayout(self)
         dlg_layout.setContentsMargins(16, 16, 16, 16)
         dlg_layout.setSpacing(12)
 
@@ -213,29 +212,9 @@ class DAQProfilesWindow(QPushButton):
         btn_delete.clicked.connect(on_delete)
         btn_save.clicked.connect(on_save)
         btn_apply.clicked.connect(on_apply_active)
-        btn_cancel.clicked.connect(dlg.reject)
+        btn_cancel.clicked.connect(self.reject)
 
         load_profile(profile_combo.currentText())
-        dlg.exec_()
-
-    def _populate_signal_selector(self, total_tasks, preferred_label=None):
-        current_label = preferred_label or self.signal_selector.currentText()
-        self.signal_selector.blockSignals(True)
-        self.signal_selector.clear()
-
-        for label, channel_value in total_tasks.items():
-            self.signal_selector.addItem(label, channel_value)
-
-        if current_label:
-            idx = self.signal_selector.findText(current_label)
-            if idx >= 0:
-                self.signal_selector.setCurrentIndex(idx)
-            elif self.signal_selector.count() > 0:
-                self.signal_selector.setCurrentIndex(0)
-        elif self.signal_selector.count() > 0:
-            self.signal_selector.setCurrentIndex(0)
-
-        self.signal_selector.blockSignals(False)
 
     def _sync_active_profile_label(self):
         self.daq_profile_label.setText(f"Active DAQ profile: {self.active_daq_profile_name}")

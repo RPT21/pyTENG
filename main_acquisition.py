@@ -8,6 +8,9 @@ from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Di
 
 from ClassStructures.MeasurementCore import AcquisitionProgram
 
+import logging
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+
 R_LOAD_PROFILE = [
     {
         "NAME": "R_LOAD",
@@ -150,7 +153,7 @@ if debug:
     else:
         exp_dir = r"C:\Users\rpieres\Desktop\Test"
     tribu_id = "PDMSvsNylon"
-    rload_id = "10"
+    rload_id = "R10"
 else:
     exp_dir = None
     tribu_id = None

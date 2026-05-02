@@ -9,44 +9,108 @@ from ctypes import byref, c_int32
 
 class DAQTaskBase(Task):
     def __init__(self,
-                 PLOT_BUFFER_SIZE,
+                 TASK,
                  BUFFER_PROCESSOR,
-                 BUFFER_SIZE,
-                 CHANNELS,
-                 SAMPLE_RATE,
-                 SAMPLES_PER_CALLBACK,
-                 AcquisitionProgramReference,
-                 TRIGGER_SOURCE=None):
+                 DAQ_USB_TRANSFER_FREQUENCY,
+                 BUFFER_SAVING_TIME_INTERVAL,
+                 TimeWindowLength,
+                 AcquisitionProgramReference):
 
         super().__init__()
 
-        self.SAMPLE_RATE = SAMPLE_RATE
-        self.SAMPLES_PER_CALLBACK = SAMPLES_PER_CALLBACK
-        self.BUFFER_SIZE = BUFFER_SIZE
-        self.CHANNELS = CHANNELS
-        self.PLOT_BUFFER_SIZE = PLOT_BUFFER_SIZE
+        self.NAME = TASK["NAME"]
+        self.CHANNELS = TASK["DAQ_CHANNELS"]
+        self.SAMPLE_RATE = TASK["SAMPLE_RATE"]
+        self.TRIGGER_SOURCE = TASK["TRIGGER_SOURCE"]
         self.number_channels = len(self.CHANNELS)
+
+        # The order of definition is the order of saving into buffer, so we introduce an index to know the position:
+        for idx, (name, config) in enumerate(TASK["DAQ_CHANNELS"].items()):
+            TASK["DAQ_CHANNELS"][name] = [config, idx]
+
+        # Introduce the DAQ Task reference into the TASK definition for later use in the acquisition graph
+        TASK["DAQ_TASK_REFERENCE"] = self
+
+        # Get internal DAQ buffer size based on total sampling rate
+        internal_buffer_size = self._get_daq_internal_buffer_size(self.SAMPLE_RATE)
+
+        # Calculate initial SAMPLES_PER_CALLBACK
+        initial_samples_per_callback = int(self.SAMPLE_RATE/ DAQ_USB_TRANSFER_FREQUENCY)
+
+        # Find divisors of internal buffer size
+        divisors_of_internal_buffer = self._find_divisors(internal_buffer_size)
+
+        # Pick the divisor closest to initial_samples_per_callback
+        samples_per_callback = min(divisors_of_internal_buffer,
+                                   key=lambda x: abs(x - initial_samples_per_callback))
+
+        # Log the adjustment if it changed
+        if samples_per_callback != initial_samples_per_callback:
+            print(
+                f"Task {self.NAME}: Adjusted SAMPLES_PER_CALLBACK from {initial_samples_per_callback} to {samples_per_callback}")
+            print(f"  Task sampling rate: {self.SAMPLE_RATE} Hz, DAQ Internal buffer size: {internal_buffer_size}")
+
+        # Calculate other parameters
+        callbacks_per_buffer = int(BUFFER_SAVING_TIME_INTERVAL * DAQ_USB_TRANSFER_FREQUENCY)
+        plot_buffer_size = ((self.SAMPLE_RATE * TimeWindowLength) // samples_per_callback) * samples_per_callback
+
+        self.BUFFER_SIZE = samples_per_callback * callbacks_per_buffer
+        self.PLOT_BUFFER_SIZE = plot_buffer_size
+        self.SAMPLES_PER_CALLBACK = samples_per_callback
+        self.INTERNAL_BUFFER_SIZE = internal_buffer_size
 
         # Define the plot buffer
         self.plot_buffer = np.empty((self.PLOT_BUFFER_SIZE, self.number_channels), dtype=np.float64)
         self.plot_buffer.fill(np.nan)
-
         self.write_index = 0
+
+        # Define the Buffer Processor Save Signal
         self.BUFFER_PROCESSOR = BUFFER_PROCESSOR
         self.processor_signal = BUFFER_PROCESSOR.process_buffer_signal
 
+        # Define the two buffer switching architecture
         self.buffer1 = np.empty((self.BUFFER_SIZE, self.number_channels), dtype=np.float64)
         self.buffer2 = np.empty((self.BUFFER_SIZE, self.number_channels), dtype=np.float64)
         self.current_buffer = self.buffer1
         self.index = 0
+
+        # Connect with the main window
         self.mainWindow = AcquisitionProgramReference
 
         # Apply conversion factors only when at least one of the factors is not None
-        conv_factors = [ch[0]["conversion_factor"] for ch in CHANNELS.values()]
+        conv_factors = [ch[0]["conversion_factor"] for ch in self.CHANNELS.values()]
         self.xApplyFactors = any(v is not None for v in conv_factors)
 
-        if TRIGGER_SOURCE:
-            self.CfgDigEdgeStartTrig(TRIGGER_SOURCE, DAQmx_Val_Rising)
+        if self.TRIGGER_SOURCE:
+            self.CfgDigEdgeStartTrig(self.TRIGGER_SOURCE, DAQmx_Val_Rising)
+
+    def _get_daq_internal_buffer_size(self, task_sampling_rate):
+        """
+        Calculate the internal DAQ buffer size based on the task sampling rate.
+
+        Rules:
+        - 0-100 Hz: 1,000
+        - 101-10,000 Hz: 10,000
+        - 10,001-1,000,000 Hz: 100,000
+        - >1,000,000 Hz: 1,000,000
+        """
+        if task_sampling_rate <= 100:
+            return 1000
+        elif task_sampling_rate <= 10000:
+            return 10000
+        elif task_sampling_rate <= 1000000:
+            return 100000
+        else:
+            return 1000000
+
+    def _find_divisors(self, n):
+        """Find all divisors of n, sorted"""
+        divisors = set()
+        for i in range(1, int(np.sqrt(n)) + 1):
+            if n % i == 0:
+                divisors.add(i)
+                divisors.add(n // i)
+        return sorted(divisors)
 
 
 class AnalogRead(DAQTaskBase):

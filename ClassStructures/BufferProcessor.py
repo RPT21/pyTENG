@@ -8,22 +8,24 @@ import os
 class BufferProcessor(QObject):
     process_buffer_signal = pyqtSignal(object)
 
-    def __init__(self, fs, mainWindowReference, channel_config, task_name, task_type, parent=None):
+    def __init__(self, TASK, mainWindowReference, parent=None):
         super().__init__(parent)
-        self.fs = fs
+
+        self.fs = TASK["SAMPLE_RATE"]
+        self.channel_config = TASK["DAQ_CHANNELS"]
+        self.task_name = TASK["NAME"]
+        self.task_type = TASK["TYPE"]
+
         self.process_buffer_signal.connect(self.save_data)
         self.mainWindow = mainWindowReference
         self.local_path = self.mainWindow.local_path
         self.isSaving = False
-        self.channel_config = channel_config
-        self.task_name = task_name
-        self.task_type = task_type
+
         self.file_handle = None
         self.file_path = None
 
         # Create a list of names and a list of indices
         self.channel_names = list(self.channel_config.keys())
-        self.channel_indices = [self.channel_config[k][-1] for k in self.channel_names]
 
     @pyqtSlot(object)
     def save_data(self, data):
@@ -73,7 +75,7 @@ class BufferProcessor(QObject):
         raw_data = np.fromfile(self.file_path, dtype=np.float64)
 
         # Reshape the array
-        data = raw_data.reshape(-1, len(self.channel_indices))
+        data = raw_data.reshape(-1, len(self.channel_names))
 
         # Create the timestamps
         t = np.arange(data.shape[0]) / self.fs

@@ -1,65 +1,25 @@
 import os
 import shutil
 import copy
-import numpy as np
 from datetime import datetime
+
 from PyQt5.QtWidgets import (QPushButton, QVBoxLayout, QWidget,
-                             QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog, QComboBox, QGroupBox)
+                             QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog, QGroupBox)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, pyqtSlot
-from utils.ImportantFunctions import CSV_merge
+
 from ClassStructures.BufferProcessor import BufferProcessor
 from ClassStructures.DeviceCommunicator import DeviceCommunicator
+from ClassStructures.AcquisitionGraph import ChannelSelectorComboBox, AcquisitionGraph
+from ClassStructures.ExpConfigWindow import ExpConfigWindow
+from ClassStructures.DAQProfilesWindow import DAQProfilesWindow
+from ClassStructures.MetadataInterface import MetadataInterface
+from utils.ImportantFunctions import CSV_merge
 
 from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Diff,
                                     DAQmx_Val_Rising, DAQmx_Val_ContSamps,
                                     DAQmx_Val_GroupByScanNumber, DAQmx_Val_Acquired_Into_Buffer,
                                     DAQmx_Val_GroupByChannel, DAQmx_Val_ChanForAllLines)
 
-import logging
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-
-def _get_daq_internal_buffer_size(task_sampling_rate):
-    """
-    Calculate the internal DAQ buffer size based on the task sampling rate.
-
-    Rules:
-    - 0-100 Hz: 1,000
-    - 101-10,000 Hz: 10,000
-    - 10,001-1,000,000 Hz: 100,000
-    - >1,000,000 Hz: 1,000,000
-    """
-    if task_sampling_rate <= 100:
-        return 1000
-    elif task_sampling_rate <= 10000:
-        return 10000
-    elif task_sampling_rate <= 1000000:
-        return 100000
-    else:
-        return 1000000
-
-def _find_divisors(n):
-    """Find all divisors of n, sorted"""
-    divisors = set()
-    for i in range(1, int(np.sqrt(n)) + 1):
-        if n % i == 0:
-            divisors.add(i)
-            divisors.add(n // i)
-    return sorted(divisors)
-
-def _set_group_readonly(group, readonly=True):
-    group.setReadonly(readonly)
-    for child in group.children():
-        if child.hasChildren():
-            _set_group_readonly(child, readonly)
-        else:
-            child.setReadonly(readonly)
-
-
-class ChannelSelectorComboBox(QComboBox):
-    def value(self):
-        return self.currentData()
-
-# ---------------- INTERFACE AND PLOT  ----------------
 class AcquisitionProgram(QWidget):
 
     trigger_acquisition_signal = pyqtSignal()
@@ -148,37 +108,6 @@ class AcquisitionProgram(QWidget):
         self.TimeWindowLength = TimeWindowLength
         self.refresh_rate = int((1 / ScreenRefreshFrequency * 1000))  # Convert to milliseconds for QTimer
 
-        # Calculate buffer sizes for each DAQ Task (from active profile)
-        for task in initial_tasks:
-            # Get internal DAQ buffer size based on total sampling rate
-            internal_buffer_size = _get_daq_internal_buffer_size(task["SAMPLE_RATE"])
-
-            # Calculate initial SAMPLES_PER_CALLBACK
-            initial_samples_per_callback = int(task["SAMPLE_RATE"] / DAQ_USB_TRANSFER_FREQUENCY)
-
-            # Find divisors of internal buffer size
-            divisors_of_internal_buffer = _find_divisors(internal_buffer_size)
-
-            # Pick the divisor closest to initial_samples_per_callback
-            samples_per_callback = min(divisors_of_internal_buffer,
-                                      key=lambda x: abs(x - initial_samples_per_callback))
-
-            # Log the adjustment if it changed
-            if samples_per_callback != initial_samples_per_callback:
-                print(f"Task {task['NAME']}: Adjusted SAMPLES_PER_CALLBACK from {initial_samples_per_callback} to {samples_per_callback}")
-                print(f"  Task sampling rate: {task["SAMPLE_RATE"]} Hz, DAQ Internal buffer size: {internal_buffer_size}")
-
-            # Calculate other parameters
-            callbacks_per_buffer = int(BUFFER_SAVING_TIME_INTERVAL * DAQ_USB_TRANSFER_FREQUENCY)
-            plot_buffer_size = ((task["SAMPLE_RATE"] * TimeWindowLength) // samples_per_callback) * samples_per_callback
-
-            self.ACQUISITION_PARAMS[task["NAME"]] = {
-                'SAMPLES_PER_CALLBACK': samples_per_callback,
-                'BUFFER_SIZE': samples_per_callback * callbacks_per_buffer,
-                'PLOT_BUFFER_SIZE': plot_buffer_size,
-                'INTERNAL_BUFFER_SIZE': internal_buffer_size,
-            }
-
         self.DAQ_TASKS = initial_tasks
         self.DAQ_TASKS_METADATA = copy.deepcopy(initial_tasks)
 
@@ -194,11 +123,6 @@ class AcquisitionProgram(QWidget):
         self.actual_plotter = None
         self.index_pointer = None
         self.local_path = [""]
-
-        # The order of definition is the order of saving into buffer, so we introduce an index to know the position:
-        for task in self.DAQ_TASKS:
-            for idx, (name, config) in enumerate(task["DAQ_CHANNELS"].items()):
-                task["DAQ_CHANNELS"][name] = [config, idx]
 
         # Check RESISTANCE_DATA when automatic_mode enabled
         if self.automatic_mode:
@@ -267,11 +191,7 @@ class AcquisitionProgram(QWidget):
         self.thread_savers = []
         self.task_names = []
         for n, task in enumerate(self.DAQ_TASKS):
-            self.buffer_processors.append(BufferProcessor(fs=task["SAMPLE_RATE"],
-                                                          mainWindowReference=self,
-                                                          channel_config=task["DAQ_CHANNELS"],
-                                                          task_name=task["NAME"],
-                                                          task_type=task["TYPE"]))
+            self.buffer_processors.append(BufferProcessor(TASK=task, mainWindowReference=self))
             self.thread_savers.append(QThread())
             self.task_names.append(task["NAME"])
             self.buffer_processors[n].moveToThread(self.thread_savers[n])
@@ -290,11 +210,9 @@ class AcquisitionProgram(QWidget):
         self.thread_communicator = QThread()
         self.dev_comunicator.moveToThread(self.thread_communicator)
         self.thread_communicator.start()
-        
-        # Plot update timer
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_plot)
-        self.timer.start(self.refresh_rate)
+
+        # Metadata Interface
+        self.MetadataInterface = MetadataInterface(mainWindowReference=self)
 
         # Signal management
         self.trigger_acquisition_signal.connect(self.trigger_acquisition)
@@ -302,34 +220,30 @@ class AcquisitionProgram(QWidget):
         self.stop_acquisition_return_signal.connect(self.stop_acquisition_return)
         self.update_button_signal.connect(self.update_button)
 
-        # Insert the DAQ Task reference in each channel and generate a dictionary with all channels
-        total_tasks = {}
-        for n, task in enumerate(self.DAQ_TASKS):
-            for channel in task["DAQ_CHANNELS"].keys():
-                task["DAQ_CHANNELS"][channel].insert(-1, self.dev_comunicator.AcquisitionTasks[n])
-            for channel_name, channel_value in task["DAQ_CHANNELS"].items():
-                total_tasks[f"{task['NAME']} - {channel_name}"] = channel_value
+        # Acquisition Graph
+        self.plot_widget = AcquisitionGraph(self.TimeWindowLength)
 
         # Signal Selector
-        self.signal_selector = ChannelSelectorComboBox()
-        self.signal_selector.setToolTip("Select the channel to display")
-        self._populate_signal_selector(total_tasks)
-        self.signal_selector.currentIndexChanged.connect(self._update_DAQ_Plot_Buffer)
+        self.signal_selector = ChannelSelectorComboBox(self.DAQ_TASKS, AcquisitionGraphReference=self.plot_widget)
 
-        # Now we can assign the signal selector to the DAQs:
-        for task in self.dev_comunicator.AcquisitionTasks:
-            task.data_column_selector = self.signal_selector
-
-        # Button to open experiment defaults editor (in separate dialog)
-        self.edit_defaults_button = QPushButton("Edit Experiment Parameters")
-        self.edit_defaults_button.clicked.connect(self.open_defaults_dialog)
+        # Button to open Experiment Configuration Editor
+        self.ExpConfigWindow = ExpConfigWindow(METADATA_COLUMNS=self.METADATA_COLUMNS, parent=self)
+        self.edit_experiment_configuration = QPushButton("Edit Experiment Parameters")
+        self.edit_experiment_configuration.clicked.connect(self.open_ExpConfigWindow)
 
         # Button to open DAQ profiles editor
+        self.DAQProfilesWindow = DAQProfilesWindow(DAQ_PROFILES=self.daq_profiles, parent=self)
         self.edit_daq_profiles_button = QPushButton("Edit DAQ Profiles")
-        self.edit_daq_profiles_button.clicked.connect(self.open_daq_profiles_dialog)
+        self.edit_daq_profiles_button.clicked.connect(self.open_DAQProfilesWindow)
 
+        # Text Label to know the active DAQ profile
         self.daq_profile_label = QLabel(f"Active DAQ profile: {self.active_daq_profile_name}")
         self.daq_profile_label.setObjectName("ProfileLabel")
+
+        # Plot update timer
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.plot_widget.update_plot)
+        self.timer.start(self.refresh_rate)
 
         channel_box = QGroupBox("Channel Selection")
         channel_layout = QVBoxLayout(channel_box)
@@ -342,7 +256,7 @@ class AcquisitionProgram(QWidget):
         settings_layout.setContentsMargins(12, 18, 12, 12)
         settings_layout.setSpacing(8)
         settings_button_row = QHBoxLayout()
-        settings_button_row.addWidget(self.edit_defaults_button)
+        settings_button_row.addWidget(self.edit_experiment_configuration)
         settings_button_row.addWidget(self.edit_daq_profiles_button)
         settings_button_row.addStretch(1)
         settings_layout.addLayout(settings_button_row)
@@ -374,11 +288,17 @@ class AcquisitionProgram(QWidget):
         self.layout.addWidget(acquisition_box)
         self.layout.addWidget(plot_box)
 
-        self._update_DAQ_Plot_Buffer()
+        self.plot_widget.update_DAQ_Plot_Buffer()
 
         if self.automatic_mode:
             print("Starting acquisition in automatic mode.")
             self.trigger_acquisition()
+
+    def open_ExpConfigWindow(self):
+        self.ExpConfigWindow.exec_()
+
+    def open_DAQProfilesWindow(self):
+        self.DAQProfilesWindow.exec_()
 
     def update_countdown(self):
 
@@ -433,7 +353,7 @@ class AcquisitionProgram(QWidget):
     def stop_acquisition_return(self):
 
         # Clean the screen
-        self.flush_screen()
+        self.plot_widget.flush_screen()
 
         # Close the opened files
         for processor in self.buffer_processors:
@@ -453,8 +373,8 @@ class AcquisitionProgram(QWidget):
                     self.motor_file = ""
 
                 # Save the metadata
-                experiment_metadata = self._build_experiment_metadata()
-                error_code = self.save_metadata(experiment_metadata)
+                experiment_metadata = self.MetadataInterface.build_experiment_metadata()
+                error_code = self.MetadataInterface.save_metadata(experiment_metadata)
 
                 if error_code == 0:
                     print("Experiment ended succesfully!")
@@ -582,11 +502,19 @@ class AcquisitionProgram(QWidget):
 
         if self.mainWindowParamGroups:
             for param_group in self.mainWindowParamGroups.values():
-                _set_group_readonly(param_group, readonly=False)
+                self._set_group_readonly(param_group, readonly=False)
 
 
         # Use the accept() method of the class QCloseEvent to close the QWidget (if not desired use the ignore() method)
         event.accept()
+
+    def _set_group_readonly(self, group, readonly=True):
+        group.setReadonly(readonly)
+        for child in group.children():
+            if child.hasChildren():
+                self._set_group_readonly(child, readonly)
+            else:
+                child.setReadonly(readonly)
 
     def showEvent(self, event):
         super().showEvent(event)
