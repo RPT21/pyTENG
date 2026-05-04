@@ -1,5 +1,6 @@
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 from ClassStructures.RaspberryInterface import RaspberryInterface
+from ClassStructures.KeithleyInterface import KeithleyInterface
 from ClassStructures.DaqInterface import *
 from PyDAQmx import DAQmxIsTaskDone, bool32
 import time
@@ -16,28 +17,41 @@ class DeviceCommunicator(QObject):
                  PrepareRaspberryLine = "Dev1/port0/line6",
                  RaspberryStatus_0_Line = "Dev1/port1/line0",
                  RaspberryStatus_1_Line = "Dev1/port1/line1",
-                 RelayCodeLines = "Dev1/port0/line0:5"):
+                 RelayCodeLines = "Dev1/port0/line0:5",
+                 keithley_resource_name=None):
 
         super().__init__(parent)
 
         self.mainWindow = mainWindowReference
 
-        self.rb_hostname = "192.168.100.200"
-        self.rb_port = 22
-        self.rb_username = "TENG"
-        self.rb_password = "raspberry"
-        self.rb_remote_path = "/var/opt/codesys/PlcLogic/FTP_Folder"
+        # Connect to Raspberry if desired:
+        if self.mainWindow.use_raspberry:
+            self.rb_hostname = "192.168.100.200"
+            self.rb_port = 22
+            self.rb_username = "TENG"
+            self.rb_password = "raspberry"
+            self.rb_remote_path = "/var/opt/codesys/PlcLogic/FTP_Folder"
 
-        self.raspberry = RaspberryInterface(hostname=self.rb_hostname,
-                                            port=self.rb_port,
-                                            username=self.rb_username,
-                                            password=self.rb_password)
+            self.raspberry = RaspberryInterface(hostname=self.rb_hostname,
+                                                port=self.rb_port,
+                                                username=self.rb_username,
+                                                password=self.rb_password)
 
-
-        self.is_rb_connected = self.raspberry.connect()
-
-        if not self.is_rb_connected:
+            self.is_rb_connected = self.raspberry.connect()
+        else:
+            self.is_rb_connected = False
             print("The program will work without using Raspberry Pi.")
+
+        # Connect to Keithley if desired:
+        if self.mainWindow.use_keithley:
+            self.keithley = KeithleyInterface(resource_name=keithley_resource_name)
+            try:
+                device_id = self.keithley.connect(timeout_ms=5000)
+                print(f"Connected to Keithley: {device_id}")
+            except Exception as exc:
+                raise RuntimeError(f"Failed to connect to Keithley: {exc}")
+        else:
+            self.keithley = None
 
         self.start_acquisition_signal.connect(self.start_acquisition)
         self.stop_acquisition_signal.connect(self.stop_acquisition)
@@ -95,10 +109,45 @@ class DeviceCommunicator(QObject):
         self.DI_task_Raspberry_status_1 = DigitalInputTask(line=RaspberryStatus_1_Line)
         self.DI_task_Raspberry_status_1.StartTask()
 
+    def rebuild_acquisition_tasks(self):
+        self.AcquisitionTasks = []
+        for n, task in enumerate(self.mainWindow.DAQ_TASKS):
+
+            if task["TYPE"] == "analog":
+                self.AcquisitionTasks.append(
+                    AnalogRead(
+                        TASK=task,
+                        BUFFER_PROCESSOR=self.mainWindow.buffer_processors[n],
+                        DAQ_USB_TRANSFER_FREQUENCY=self.mainWindow.DAQ_USB_TRANSFER_FREQUENCY,
+                        BUFFER_SAVING_TIME_INTERVAL=self.mainWindow.BUFFER_SAVING_TIME_INTERVAL,
+                        TimeWindowLength=self.mainWindow.TimeWindowLength,
+                        AcquisitionProgramReference=self.mainWindow)
+                )
+            elif task["TYPE"] == "digital":
+                self.AcquisitionTasks.append(
+                    DigitalRead(
+                        TASK=task,
+                        BUFFER_PROCESSOR=self.mainWindow.buffer_processors[n],
+                        DAQ_USB_TRANSFER_FREQUENCY=self.mainWindow.DAQ_USB_TRANSFER_FREQUENCY,
+                        BUFFER_SAVING_TIME_INTERVAL=self.mainWindow.BUFFER_SAVING_TIME_INTERVAL,
+                        TimeWindowLength=self.mainWindow.TimeWindowLength,
+                        AcquisitionProgramReference=self.mainWindow)
+                )
+            else:
+                raise Exception("Error the task TYPE is not analog neither digital")
+
     @pyqtSlot()
     def start_acquisition(self, iteration=0):
 
-        if self.is_rb_connected:
+        # Resolve Keithley conversion factors before starting acquisition
+        if self.keithley:
+            try:
+                self._resolve_keithley_conversion_factors()
+            except Exception as exc:
+                print(f"Failed to resolve Keithley conversion factors:\n{exc}")
+                self.mainWindow.error_flag = True
+
+        if self.is_rb_connected and not self.mainWindow.error_flag:
 
             # Send a trigger to prepare the Raspberry to record data
             self.DO_task_PrepareRaspberry.set_line(1)
@@ -269,3 +318,60 @@ class DeviceCommunicator(QObject):
 
         # Send the stop acquisition return signal
         self.mainWindow.stop_acquisition_return_signal.emit()
+
+    def _resolve_keithley_conversion_factors(self):
+        """Resolve Keithley mode channels by querying device range before acquisition.
+
+        For each channel with conversion_source='keithley', reads the active measurement
+        range and stores it as the numeric conversion_factor in the DAQ_TASKS dict.
+        """
+        keithley_channels = []
+
+        # Identify all channels with Keithley mode
+        for task_idx, task in enumerate(self.mainWindow.DAQ_TASKS):
+            for channel_name, channel_config_data in task.get("DAQ_CHANNELS", {}).items():
+                # channel_config_data might be [config_dict, index] after DaqInterface initialization
+                if isinstance(channel_config_data, list):
+                    channel_config = channel_config_data[0]
+                else:
+                    channel_config = channel_config_data
+
+                if channel_config.get("conversion_source", "").strip().lower() == "keithley":
+                    keithley_channels.append({
+                        "task_idx": task_idx,
+                        "channel_name": channel_name,
+                        "channel_config": channel_config,
+                        "task_name": task.get("NAME", "Unknown"),
+                    })
+
+        if not keithley_channels:
+            return  # No Keithley channels, nothing to do
+
+        # Query range for each Keithley channel and update DAQ_TASKS
+        for channel_info in keithley_channels:
+            try:
+                # Query voltage range (can be extended to support different sense types)
+                measurement_range = self.keithley.read_range(sense="VOLT")
+                conversion_factor = self.keithley.conversion_factor_from_range(
+                    measurement_range)
+
+                # Directly update in DAQ_TASKS dict
+                task = self.mainWindow.DAQ_TASKS[channel_info["task_idx"]]
+                channel_config_data = task["DAQ_CHANNELS"][channel_info["channel_name"]]
+
+                # Handle both formats: direct dict or [dict, index]
+                if isinstance(channel_config_data, list):
+                    channel_config_data[0]["conversion_factor"] = conversion_factor
+                else:
+                    channel_config_data["conversion_factor"] = conversion_factor
+
+                print(
+                    f"Resolved Keithley range for task '{channel_info['task_name']}' "
+                    f"channel '{channel_info['channel_name']}': {measurement_range} V -> "
+                    f"conversion_factor = {conversion_factor}"
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to read Keithley range for channel "
+                    f"'{channel_info['channel_name']}': {exc}"
+                )

@@ -12,3 +12,4 @@ paramiko
 matplotlib
 scipy
 scipy-stubs
+pyvisa

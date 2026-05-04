@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import QComboBox
 
 class ChannelSelectorComboBox(QComboBox):
 
-    def __init__(self, DAQ_TASKS, AcquisitionGraphReference):
+    def __init__(self, DAQ_TASKS, AcquisitionGraphReference, preferred_label=None):
         super().__init__()
 
         # Generate a dictionary with all channels and corresponding tasks
@@ -15,7 +15,7 @@ class ChannelSelectorComboBox(QComboBox):
                 self.ALL_CHANNELS[f"{task['NAME']} - {channel_name}"] = [channel_value[-1], task["DAQ_TASK_REFERENCE"]]
 
         # Create the channel display list
-        self._populate_signal_selector(self.ALL_CHANNELS)
+        self._populate_signal_selector(self.ALL_CHANNELS, preferred_label=preferred_label)
         self.setToolTip("Select the channel to display")
 
         # Connect with the Acquisition Graph
@@ -25,6 +25,15 @@ class ChannelSelectorComboBox(QComboBox):
 
     def value(self):
         return self.currentData()
+
+    def rebuild_signal_selector(self, DAQ_TASKS, preferred_label=None):
+        self.ALL_CHANNELS.clear()
+        for n, task in enumerate(DAQ_TASKS):
+            for channel_name, channel_value in task["DAQ_CHANNELS"].items():
+                self.ALL_CHANNELS[f"{task['NAME']} - {channel_name}"] = [channel_value[-1], task["DAQ_TASK_REFERENCE"]]
+
+        # Create the channel display list
+        self._populate_signal_selector(self.ALL_CHANNELS, preferred_label=preferred_label)
 
     def _populate_signal_selector(self, total_tasks, preferred_label=None):
         current_label = preferred_label or self.currentText()

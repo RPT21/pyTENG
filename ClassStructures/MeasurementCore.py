@@ -1,10 +1,11 @@
 import os
 import shutil
 import copy
+import json
 from datetime import datetime
 
 from PyQt5.QtWidgets import (QPushButton, QVBoxLayout, QWidget,
-                             QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog, QGroupBox)
+                             QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog, QGroupBox, QMessageBox)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, pyqtSlot
 
 from ClassStructures.BufferProcessor import BufferProcessor
@@ -20,6 +21,37 @@ from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Di
                                     DAQmx_Val_GroupByScanNumber, DAQmx_Val_Acquired_Into_Buffer,
                                     DAQmx_Val_GroupByChannel, DAQmx_Val_ChanForAllLines)
 
+def _default_daq_task(task_type="analog"):
+    return {
+        "NAME": "New Task",
+        "SAMPLE_RATE": 10000,
+        "DAQ_CHANNELS": {
+            "Channel 1": {
+                "port": "",
+                "port_config": DAQmx_Val_Diff if task_type == "analog" else None,
+                "conversion_source": "none",
+                "conversion_factor": None,
+            }
+        },
+        "TRIGGER_SOURCE": None,
+        "TYPE": task_type,
+    }
+
+def _normalize_daq_profiles_source(daq_profiles):
+    if daq_profiles is None:
+        return {"Default": [_default_daq_task()]}
+
+    if isinstance(daq_profiles, str):
+        if not os.path.isfile(daq_profiles):
+            raise FileNotFoundError(f"DAQ_PROFILES file not found: {daq_profiles}")
+        with open(daq_profiles, "r", encoding="utf-8") as handle:
+            daq_profiles = json.load(handle)
+
+    if not isinstance(daq_profiles, dict):
+        raise ValueError("DAQ_PROFILES must be None, a non-empty dict, or a path to a JSON file containing profiles.")
+
+    return daq_profiles
+
 class AcquisitionProgram(QWidget):
 
     trigger_acquisition_signal = pyqtSignal()
@@ -28,8 +60,8 @@ class AcquisitionProgram(QWidget):
     update_button_signal = pyqtSignal()
     
     def __init__(self,
-                 DAQ_PROFILES,
                  METADATA_COLUMNS,
+                 DAQ_PROFILES=None,
                  automatic_mode=False,
                  RESISTANCE_DATA=None,
                  exp_dir=None,
@@ -50,7 +82,10 @@ class AcquisitionProgram(QWidget):
                  PrepareRaspberryLine="Dev1/port0/line6",
                  RaspberryStatus_0_Line="Dev1/port1/line0",
                  RaspberryStatus_1_Line="Dev1/port1/line1",
-                 RelayCodeLines="Dev1/port0/line0:5"):
+                 RelayCodeLines="Dev1/port0/line0:5",
+                 use_raspberry=True,
+                 use_keithley=True,
+                 keithley_resource_name=None):
 
         super().__init__(parent)
         self.setWindowTitle("DAQ Viewer")
@@ -87,6 +122,8 @@ class AcquisitionProgram(QWidget):
         self.RaspberryStatus_0_Line = RaspberryStatus_0_Line
         self.RaspberryStatus_1_Line = RaspberryStatus_1_Line
         self.RelayCodeLines = RelayCodeLines
+        self.use_raspberry = use_raspberry
+        self.use_keithley = use_keithley
 
         # ---------------- CONFIG ----------------
 
@@ -97,19 +134,16 @@ class AcquisitionProgram(QWidget):
         self.METADATA_COLUMNS = METADATA_COLUMNS
         self.measure_time = measure_time
 
-        # Initialize DAQ profiles from provided mapping (profile_name -> list of DAQ task dicts)
-        if not isinstance(DAQ_PROFILES, dict) or not DAQ_PROFILES:
-            raise ValueError("DAQ_PROFILES must be a non-empty dict mapping profile names to DAQ task lists")
-        self.daq_profiles = copy.deepcopy(DAQ_PROFILES)
+        # Initialize DAQ profiles from None / dict / JSON file path.
+        self.daq_profiles = _normalize_daq_profiles_source(DAQ_PROFILES)
         self.active_daq_profile_name = "Default" if "Default" in self.daq_profiles else next(iter(self.daq_profiles.keys()))
-        initial_tasks = copy.deepcopy(self.daq_profiles[self.active_daq_profile_name])
 
         # Plot parameters
         self.TimeWindowLength = TimeWindowLength
         self.refresh_rate = int((1 / ScreenRefreshFrequency * 1000))  # Convert to milliseconds for QTimer
 
-        self.DAQ_TASKS = initial_tasks
-        self.DAQ_TASKS_METADATA = copy.deepcopy(initial_tasks)
+        self.DAQ_TASKS = copy.deepcopy(self.daq_profiles[self.active_daq_profile_name])
+        self.DAQ_TASKS_METADATA = copy.deepcopy(self.DAQ_TASKS)
 
         self.automatic_mode = automatic_mode
         self.error_flag = False
@@ -175,7 +209,7 @@ class AcquisitionProgram(QWidget):
         self.timer_spinbox.setRange(1, 86400)  # 1 sec to 24 hours
         self.timer_spinbox.setValue(measure_time)  # Default value
         self.countdown_display = QLabel("Remaining time: -")
-        self.countdown_display.setAlignment(Qt.AlignRight)
+        self.countdown_display.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.duration = QHBoxLayout()
         self.duration.addWidget(self.timer_label)
         self.duration.addWidget(self.timer_spinbox)
@@ -189,26 +223,25 @@ class AcquisitionProgram(QWidget):
         # Buffer processor and thread for each DAQ Task
         self.buffer_processors = []
         self.thread_savers = []
-        self.task_names = []
         for n, task in enumerate(self.DAQ_TASKS):
             self.buffer_processors.append(BufferProcessor(TASK=task, mainWindowReference=self))
             self.thread_savers.append(QThread())
-            self.task_names.append(task["NAME"])
             self.buffer_processors[n].moveToThread(self.thread_savers[n])
             self.thread_savers[n].start()
 
         # Raspberry Communicator + DAQ Analog Task (2 threads):
-        self.dev_comunicator = DeviceCommunicator(mainWindowReference=self,
+        self.dev_communicator = DeviceCommunicator(mainWindowReference=self,
                                                   RelayCodeTask=RelayCodeTask,
                                                   LinMotTriggerTask=LinMotTriggerTask,
                                                   LinMotTriggerLine=LinMotTriggerLine,
                                                   PrepareRaspberryLine=PrepareRaspberryLine,
                                                   RaspberryStatus_0_Line=RaspberryStatus_0_Line,
                                                   RaspberryStatus_1_Line=RaspberryStatus_1_Line,
-                                                  RelayCodeLines=RelayCodeLines)
+                                                  RelayCodeLines=RelayCodeLines,
+                                                  keithley_resource_name=keithley_resource_name)
 
         self.thread_communicator = QThread()
-        self.dev_comunicator.moveToThread(self.thread_communicator)
+        self.dev_communicator.moveToThread(self.thread_communicator)
         self.thread_communicator.start()
 
         # Metadata Interface
@@ -232,7 +265,7 @@ class AcquisitionProgram(QWidget):
         self.edit_experiment_configuration.clicked.connect(self.open_ExpConfigWindow)
 
         # Button to open DAQ profiles editor
-        self.DAQProfilesWindow = DAQProfilesWindow(DAQ_PROFILES=self.daq_profiles, parent=self)
+        self.DAQProfilesWindow = DAQProfilesWindow(DAQ_PROFILES=self.daq_profiles, main_window_reference=self)
         self.edit_daq_profiles_button = QPushButton("Edit DAQ Profiles")
         self.edit_daq_profiles_button.clicked.connect(self.open_DAQProfilesWindow)
 
@@ -300,12 +333,99 @@ class AcquisitionProgram(QWidget):
     def open_DAQProfilesWindow(self):
         self.DAQProfilesWindow.exec_()
 
+    def _sync_active_profile_label(self):
+        self.daq_profile_label.setText(f"Active DAQ profile: {self.active_daq_profile_name}")
+
+    def _close_runtime_daq_resources(self):
+
+        # Disconnect plotter and index pointer from the Acquisition Graph to avoid errors when closing DAQ tasks
+        self.actual_plotter = None
+        self.index_pointer = None
+        self.plot_widget.flush_screen()
+
+        # Remove Acquisition Tasks
+        for task in self.dev_communicator.AcquisitionTasks:
+            task.StopTask()
+            task.ClearTask()
+
+        # Remove all created files
+        for processor in self.buffer_processors:
+            if processor.file_handle is not None:
+                processor.remove_file()
+
+        # Remove buffer save threads
+        for thread in self.thread_savers:
+            thread.quit()
+            thread.wait()
+
+        # Clear all Acquisition Tasks and Buffer Processors
+        self.dev_communicator.AcquisitionTasks.clear()
+        self.buffer_processors.clear()
+        self.thread_savers.clear()
+
+    def _refresh_signal_selector(self, preferred_label=None):
+        self.signal_selector.rebuild_signal_selector(self.DAQ_TASKS)
+        self.plot_widget.update_DAQ_Plot_Buffer()
+
+    def apply_daq_profile(self, profile_name):
+        if profile_name not in self.daq_profiles:
+            raise KeyError(f"Unknown DAQ profile '{profile_name}'.")
+
+        if self.moveLinMot[0]:
+            raise RuntimeError("Stop the acquisition before applying a new DAQ profile.")
+
+        self._close_runtime_daq_resources()
+
+        self.DAQ_TASKS = copy.deepcopy(self.daq_profiles[profile_name])
+        self.DAQ_TASKS_METADATA = copy.deepcopy(self.DAQ_TASKS)
+
+        try:
+            self.buffer_processors = []
+            self.thread_savers = []
+
+            for task in self.DAQ_TASKS:
+                processor = BufferProcessor(TASK=task, mainWindowReference=self)
+                self.buffer_processors.append(processor)
+                thread = QThread()
+                self.thread_savers.append(thread)
+                processor.moveToThread(thread)
+                thread.start()
+
+            self.dev_communicator.rebuild_acquisition_tasks()
+            self._refresh_signal_selector()
+
+        except Exception as e:
+            self._close_runtime_daq_resources()
+            raise Exception(f"Error while applying DAQ profile '{profile_name}': {e}")
+
+        self.active_daq_profile_name = profile_name
+        self._sync_active_profile_label()
+        print(f"Succesfully applied DAQ profile '{profile_name}'.")
+
+    def _daq_tasks_require_keithley(self):
+        """Check if any channel in DAQ_TASKS requires Keithley conversion factor resolution.
+
+        Returns:
+            bool: True if any channel has conversion_source='keithley', False otherwise.
+        """
+        for task in self.DAQ_TASKS:
+            for channel_name, channel_config_data in task.get("DAQ_CHANNELS", {}).items():
+                # channel_config_data might be [config_dict, index] after DaqInterface initialization
+                if isinstance(channel_config_data, list):
+                    channel_config = channel_config_data[0]
+                else:
+                    channel_config = channel_config_data
+
+                if channel_config.get("conversion_source", "").strip().lower() == "keithley":
+                    return True
+        return False
+
     def update_countdown(self):
 
-        if self.dev_comunicator.is_rb_connected:
+        if self.dev_communicator.is_rb_connected:
             # It takes aprox 10e-5 seconds to read the status bits
-            status_bit_0 = self.dev_comunicator.DI_task_Raspberry_status_0.read_line()
-            status_bit_1 = self.dev_comunicator.DI_task_Raspberry_status_1.read_line()
+            status_bit_0 = self.dev_communicator.DI_task_Raspberry_status_0.read_line()
+            status_bit_1 = self.dev_communicator.DI_task_Raspberry_status_1.read_line()
 
             if not (status_bit_0 == 1 and status_bit_1 == 0):
                 if not self.error_flag:
@@ -367,7 +487,7 @@ class AcquisitionProgram(QWidget):
                     processor.Binary_to_Pickle()
 
                 # Merge the LinMot CSV files
-                if self.dev_comunicator.is_rb_connected:
+                if self.dev_communicator.is_rb_connected:
                     self.motor_file = CSV_merge(folder_path=self.local_path[0], exp_id=self.exp_id)
                 else:
                     self.motor_file = ""
@@ -418,7 +538,7 @@ class AcquisitionProgram(QWidget):
                 # STOP ADQUISITION
                 self.measurement_timer.stop()
                 self.countdown_display.setText("Remaining time: -")
-                self.dev_comunicator.stop_acquisition_signal.emit()
+                self.dev_communicator.stop_acquisition_signal.emit()
                 print("Stopped acquisition due to an error.")
                 return
 
@@ -429,7 +549,7 @@ class AcquisitionProgram(QWidget):
             # STOP ADQUISITION
             self.measurement_timer.stop()
             self.countdown_display.setText("Remaining time: -")
-            self.dev_comunicator.stop_acquisition_signal.emit()
+            self.dev_communicator.stop_acquisition_signal.emit()
         else:
             # START ADQUISITION
             if self.automatic_mode:
@@ -439,6 +559,21 @@ class AcquisitionProgram(QWidget):
                 self.rload_id, ok = QInputDialog.getText(self, "Input", "Enter RloadId:")
                 if not ok or not self.rload_id:
                     print("No RloadId entered. Operation canceled.")
+                    return
+
+            # Check if Keithley is required but not available
+            if self._daq_tasks_require_keithley():
+                if not self.use_keithley:
+                    error_msg = (
+                        "One or more channels require Keithley conversion factor resolution, "
+                        "but Keithley is not available.\n\n"
+                        "Please:\n"
+                        "1. Ensure 'use_keithley=True' is set\n"
+                        "2. Verify Keithley VISA resource name is correctly configured\n"
+                        "3. Check that Keithley device is powered on and connected"
+                    )
+                    QMessageBox.critical(self, "Keithley Connection Error", error_msg)
+                    print(f"\033[91m{error_msg}\033[0m")
                     return
 
             self.date_now = datetime.now().strftime("%d%m%Y_%H%M%S")
@@ -453,37 +588,49 @@ class AcquisitionProgram(QWidget):
             for processor in self.buffer_processors:
                 processor.open_file()
 
-            self.dev_comunicator.start_acquisition_signal.emit()
+            self.dev_communicator.start_acquisition_signal.emit()
 
     def closeEvent(self, event):
 
         print("\nClosing DAQ Viewer")
 
         if not self.xClose:
+            # Disconnect from Keithley if connected
+            if self.dev_communicator.keithley is not None:
+                try:
+                    self.dev_communicator.keithley.disconnect()
+                except Exception as e:
+                    print(f"Warning: Failed to disconnect from Keithley: {e}")
+                self.dev_communicator.keithley = None
+
             # Cleanup DAQ tasks
-            for task in self.dev_comunicator.AcquisitionTasks:
+            for task in self.dev_communicator.AcquisitionTasks:
                 task.StopTask()
                 task.ClearTask()
 
-            self.dev_comunicator.DO_task_LinMotTrigger.set_line(0)
+            self.dev_communicator.DO_task_LinMotTrigger.set_line(0)
             if not self.LinMotTriggerTask:
-                self.dev_comunicator.DO_task_LinMotTrigger.StopTask()
-                self.dev_comunicator.DO_task_LinMotTrigger.ClearTask()
+                self.dev_communicator.DO_task_LinMotTrigger.StopTask()
+                self.dev_communicator.DO_task_LinMotTrigger.ClearTask()
 
-            self.dev_comunicator.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
+            self.dev_communicator.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
             if not self.RelayCodeTask:
-                self.dev_comunicator.DO_task_RelayCode.StopTask()
-                self.dev_comunicator.DO_task_RelayCode.ClearTask()
+                self.dev_communicator.DO_task_RelayCode.StopTask()
+                self.dev_communicator.DO_task_RelayCode.ClearTask()
 
-            self.dev_comunicator.DO_task_PrepareRaspberry.set_line(0)
-            self.dev_comunicator.DO_task_PrepareRaspberry.StopTask()
-            self.dev_comunicator.DO_task_PrepareRaspberry.ClearTask()
+            self.dev_communicator.DO_task_PrepareRaspberry.set_line(0)
+            self.dev_communicator.DO_task_PrepareRaspberry.StopTask()
+            self.dev_communicator.DO_task_PrepareRaspberry.ClearTask()
 
-            self.dev_comunicator.DI_task_Raspberry_status_0.StopTask()
-            self.dev_comunicator.DI_task_Raspberry_status_0.ClearTask()
+            self.dev_communicator.DI_task_Raspberry_status_0.StopTask()
+            self.dev_communicator.DI_task_Raspberry_status_0.ClearTask()
 
-            self.dev_comunicator.DI_task_Raspberry_status_1.StopTask()
-            self.dev_comunicator.DI_task_Raspberry_status_1.ClearTask()
+            self.dev_communicator.DI_task_Raspberry_status_1.StopTask()
+            self.dev_communicator.DI_task_Raspberry_status_1.ClearTask()
+
+            # Disconnect from Raspberry if connected
+            if self.dev_communicator.is_rb_connected:
+                self.dev_communicator.raspberry.disconnect()
 
             for thread in self.thread_savers:
                 thread.quit()
@@ -520,4 +667,4 @@ class AcquisitionProgram(QWidget):
         super().showEvent(event)
         if self.xClose:
             # Close the QWidget as soon as it is created adding in the event loop a QTimer event
-            QTimer.singleShot(0, self.close)
+            QTimer.singleShot(0, lambda: self.close())

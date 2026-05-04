@@ -17,11 +17,11 @@ R_LOAD_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS":{
-            "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff, "conversion_factor": None},
+            "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff, "conversion_source": "keithley", "conversion_factor": None},
         },
 
-        # "TRIGGER_SOURCE": "PFI0",
-        "TRIGGER_SOURCE": None,
+        "TRIGGER_SOURCE": "PFI0",
+        # "TRIGGER_SOURCE": None,
 
         "TYPE": "analog"
     },
@@ -31,8 +31,8 @@ R_LOAD_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS":{
-            "LinMot_Enable": {"port":"Dev2/port0/line0", "port_config":None, "conversion_factor": None},
-            "LinMot_Up_Down": {"port":"Dev2/port0/line1", "port_config":None, "conversion_factor": None}
+            "LinMot_Enable": {"port":"Dev2/port0/line0", "port_config":None, "conversion_source": "none", "conversion_factor": None},
+            "LinMot_Up_Down": {"port":"Dev2/port0/line1", "port_config":None, "conversion_source": "none", "conversion_factor": None}
         },
 
         # "TRIGGER_SOURCE": "PFI0",
@@ -47,7 +47,7 @@ OPEN_CIRCUIT_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS": {
-            "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff, "conversion_factor": None},
+            "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff, "conversion_source": "none", "conversion_factor": None},
         },
 
         # "TRIGGER_SOURCE": "PFI0",
@@ -61,8 +61,8 @@ OPEN_CIRCUIT_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS": {
-            "LinMot_Enable": {"port": "Dev2/port0/line0", "port_config": None, "conversion_factor": None},
-            "LinMot_Up_Down": {"port": "Dev2/port0/line1", "port_config": None, "conversion_factor": None}
+            "LinMot_Enable": {"port": "Dev2/port0/line0", "port_config": None, "conversion_source": "none", "conversion_factor": None},
+            "LinMot_Up_Down": {"port": "Dev2/port0/line1", "port_config": None, "conversion_source": "none", "conversion_factor": None}
         },
 
         # "TRIGGER_SOURCE": "PFI0",
@@ -77,7 +77,7 @@ SHORT_CIRCUIT_CURRENT_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS": {
-            "Current": {"port": "Dev1/ai2", "port_config": DAQmx_Val_RSE, "conversion_factor": 1},
+            "Current": {"port": "Dev1/ai2", "port_config": DAQmx_Val_RSE, "conversion_source": "none", "conversion_factor": 1},
         },
 
         # "TRIGGER_SOURCE": "PFI0",
@@ -91,8 +91,8 @@ SHORT_CIRCUIT_CURRENT_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS": {
-            "LinMot_Enable": {"port": "Dev2/port0/line0", "port_config": None, "conversion_factor": None},
-            "LinMot_Up_Down": {"port": "Dev2/port0/line1", "port_config": None, "conversion_factor": None}
+            "LinMot_Enable": {"port": "Dev2/port0/line0", "port_config": None, "conversion_source": "none", "conversion_factor": None},
+            "LinMot_Up_Down": {"port": "Dev2/port0/line1", "port_config": None, "conversion_source": "none", "conversion_factor": None}
         },
 
         # "TRIGGER_SOURCE": "PFI0",
@@ -149,7 +149,7 @@ debug = True
 tribo_lab = True
 if debug:
     if tribo_lab:
-        exp_dir = r"C:\Users\marre\Documents\TENG_Project_SaveFolder"
+        exp_dir = r"C:\Users\rpieres\Documents\TENG_Project_SaveFolder"
     else:
         exp_dir = r"C:\Users\rpieres\Desktop\Test"
     tribu_id = "PDMSvsNylon"
@@ -166,6 +166,8 @@ window = AcquisitionProgram(DAQ_PROFILES=DAQ_PROFILES,
                             measure_time=1,
                             exp_dir=exp_dir,
                             tribu_id=tribu_id,
-                            rload_id=rload_id)
+                            rload_id=rload_id,
+                            use_keithley=False,
+                            use_raspberry=True)
 window.show()
 sys.exit(app.exec_())

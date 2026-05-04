@@ -323,10 +323,10 @@ class MainWindow(QWidget):
         self.thread_saver.start()
 
         # Raspberry Communicator + DAQ Analog Task (2 threads):
-        self.dev_comunicator = DeviceCommunicator(mainWindowReference=self)
+        self.dev_communicator = DeviceCommunicator(mainWindowReference=self)
         self.thread_signal_manager.connect(self.run_function)
         self.thread_communicator = QThread()
-        self.dev_comunicator.moveToThread(self.thread_communicator)
+        self.dev_communicator.moveToThread(self.thread_communicator)
         self.thread_communicator.start()
 
         # QTimer to update plot view
@@ -340,8 +340,8 @@ class MainWindow(QWidget):
 
         ### Display DAQ signal (using circular buffer method)
         display_data = np.concatenate((
-        self.plot_buffer[self.dev_comunicator.task.write_index:],
-        self.plot_buffer[:self.dev_comunicator.task.write_index]
+        self.plot_buffer[self.dev_communicator.task.write_index:],
+        self.plot_buffer[:self.dev_communicator.task.write_index]
         ))
         self.curve.setData(display_data)
 
@@ -361,22 +361,22 @@ class MainWindow(QWidget):
 
     def closeEvent(self, event):
 
-        self.dev_comunicator.task.StopTask()
-        self.dev_comunicator.task.ClearTask()
+        self.dev_communicator.task.StopTask()
+        self.dev_communicator.task.ClearTask()
 
-        self.dev_comunicator.DO_task_LinMotTrigger.set_line(0)
-        self.dev_comunicator.DO_task_LinMotTrigger.StopTask()
-        self.dev_comunicator.DO_task_LinMotTrigger.ClearTask()
+        self.dev_communicator.DO_task_LinMotTrigger.set_line(0)
+        self.dev_communicator.DO_task_LinMotTrigger.StopTask()
+        self.dev_communicator.DO_task_LinMotTrigger.ClearTask()
 
-        self.dev_comunicator.DO_task_PrepareRaspberry.set_line(0)
-        self.dev_comunicator.DO_task_PrepareRaspberry.StopTask()
-        self.dev_comunicator.DO_task_PrepareRaspberry.ClearTask()
+        self.dev_communicator.DO_task_PrepareRaspberry.set_line(0)
+        self.dev_communicator.DO_task_PrepareRaspberry.StopTask()
+        self.dev_communicator.DO_task_PrepareRaspberry.ClearTask()
 
-        self.dev_comunicator.DI_task_Raspberry_status_0.StopTask()
-        self.dev_comunicator.DI_task_Raspberry_status_0.ClearTask()
+        self.dev_communicator.DI_task_Raspberry_status_0.StopTask()
+        self.dev_communicator.DI_task_Raspberry_status_0.ClearTask()
 
-        self.dev_comunicator.DI_task_Raspberry_status_1.StopTask()
-        self.dev_comunicator.DI_task_Raspberry_status_1.ClearTask()
+        self.dev_communicator.DI_task_Raspberry_status_1.StopTask()
+        self.dev_communicator.DI_task_Raspberry_status_1.ClearTask()
 
         self.thread_saver.quit()
         self.thread_saver.wait()
@@ -396,10 +396,10 @@ class MainWindow(QWidget):
     def trigger_acquisition(self):
         if self.moveLinMot:
             print("moveLinMot is True")
-            self.dev_comunicator.stop_acquisition_signal.emit()
+            self.dev_communicator.stop_acquisition_signal.emit()
         else:
             print("moveLinMot is False")
-            self.dev_comunicator.start_acquisition_signal.emit()
+            self.dev_communicator.start_acquisition_signal.emit()
 
 
 class DigitalOutputTask(Task):

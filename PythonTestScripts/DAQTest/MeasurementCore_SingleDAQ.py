@@ -437,7 +437,7 @@ class AcquisitionProgram(QWidget):
         self.thread_saver.start()
 
         # Raspberry Communicator + DAQ Analog Task (2 threads):
-        self.dev_comunicator = DeviceCommunicator(mainWindowReference=self,
+        self.dev_communicator = DeviceCommunicator(mainWindowReference=self,
                                                   RelayCodeTask=RelayCodeTask,
                                                   LinMotTriggerTask=LinMotTriggerTask,
                                                   LinMotTriggerLine=LinMotTriggerLine,
@@ -447,7 +447,7 @@ class AcquisitionProgram(QWidget):
                                                   RelayCodeLines=RelayCodeLines)
 
         self.thread_communicator = QThread()
-        self.dev_comunicator.moveToThread(self.thread_communicator)
+        self.dev_communicator.moveToThread(self.thread_communicator)
         self.thread_communicator.start()
         
         # Plot update timer
@@ -477,8 +477,8 @@ class AcquisitionProgram(QWidget):
     
     def update_plot(self):
         display_data = np.concatenate((
-            self.plot_buffer[self.dev_comunicator.task.write_index:],
-            self.plot_buffer[:self.dev_comunicator.task.write_index]
+            self.plot_buffer[self.dev_communicator.task.write_index:],
+            self.plot_buffer[:self.dev_communicator.task.write_index]
         ))
         self.curve.setData(display_data)
 
@@ -504,7 +504,7 @@ class AcquisitionProgram(QWidget):
             
             self.daq_file = Pickle_merge(folder_path=self.processor.local_path, exp_id=self.exp_id)
             
-            if self.dev_comunicator.is_rb_connected:
+            if self.dev_communicator.is_rb_connected:
                 self.motor_file = CSV_merge(folder_path=self.processor.local_path, exp_id=self.exp_id)
             else:
                 self.motor_file = ""
@@ -545,7 +545,7 @@ class AcquisitionProgram(QWidget):
             # STOP ADQUISITION
             self.measurement_timer.stop()
             self.countdown_display.setText("Remaining time: -")
-            self.dev_comunicator.stop_acquisition_signal.emit()
+            self.dev_communicator.stop_acquisition_signal.emit()
         else:
             # START ADQUISITION
             if not self.rload_id and not self.automatic_mode:
@@ -560,7 +560,7 @@ class AcquisitionProgram(QWidget):
             self.date_now = datetime.now().strftime("%d%m%Y_%H%M%S")
             self.exp_id = f"{self.date_now}-{self.tribu_id}-{self.rload_id}"
 
-            self.dev_comunicator.start_acquisition_signal.emit()
+            self.dev_communicator.start_acquisition_signal.emit()
 
     def add_experiment_row(self):
         """Add a new row to ExpsDescription.xlsx with the experiment data if it doesn't already exist."""
@@ -635,28 +635,28 @@ class AcquisitionProgram(QWidget):
 
         if not self.xClose:
             # Cleanup DAQ tasks
-            self.dev_comunicator.task.StopTask()
-            self.dev_comunicator.task.ClearTask()
+            self.dev_communicator.task.StopTask()
+            self.dev_communicator.task.ClearTask()
 
-            self.dev_comunicator.DO_task_LinMotTrigger.set_line(0)
+            self.dev_communicator.DO_task_LinMotTrigger.set_line(0)
             if not self.LinMotTriggerTask:
-                self.dev_comunicator.DO_task_LinMotTrigger.StopTask()
-                self.dev_comunicator.DO_task_LinMotTrigger.ClearTask()
+                self.dev_communicator.DO_task_LinMotTrigger.StopTask()
+                self.dev_communicator.DO_task_LinMotTrigger.ClearTask()
 
-            self.dev_comunicator.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
+            self.dev_communicator.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
             if not self.RelayCodeTask:
-                self.dev_comunicator.DO_task_RelayCode.StopTask()
-                self.dev_comunicator.DO_task_RelayCode.ClearTask()
+                self.dev_communicator.DO_task_RelayCode.StopTask()
+                self.dev_communicator.DO_task_RelayCode.ClearTask()
 
-            self.dev_comunicator.DO_task_PrepareRaspberry.set_line(0)
-            self.dev_comunicator.DO_task_PrepareRaspberry.StopTask()
-            self.dev_comunicator.DO_task_PrepareRaspberry.ClearTask()
+            self.dev_communicator.DO_task_PrepareRaspberry.set_line(0)
+            self.dev_communicator.DO_task_PrepareRaspberry.StopTask()
+            self.dev_communicator.DO_task_PrepareRaspberry.ClearTask()
 
-            self.dev_comunicator.DI_task_Raspberry_status_0.StopTask()
-            self.dev_comunicator.DI_task_Raspberry_status_0.ClearTask()
+            self.dev_communicator.DI_task_Raspberry_status_0.StopTask()
+            self.dev_communicator.DI_task_Raspberry_status_0.ClearTask()
 
-            self.dev_comunicator.DI_task_Raspberry_status_1.StopTask()
-            self.dev_comunicator.DI_task_Raspberry_status_1.ClearTask()
+            self.dev_communicator.DI_task_Raspberry_status_1.StopTask()
+            self.dev_communicator.DI_task_Raspberry_status_1.ClearTask()
 
             self.thread_saver.quit()
             self.thread_saver.wait()

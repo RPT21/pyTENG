@@ -60,7 +60,7 @@ class MetadataInterface:
         json_metadata = {
             "ExperimentId": self.mainWindow.exp_id,
             "DAQProfile": self.mainWindow.active_daq_profile_name,
-            "RaspberryConnected": self.mainWindow.dev_comunicator.is_rb_connected,
+            "RaspberryConnected": self.mainWindow.dev_communicator.is_rb_connected,
             "DAQTasks": self._normalize_daq_tasks_for_json(self.mainWindow.DAQ_TASKS_METADATA),
         }
 

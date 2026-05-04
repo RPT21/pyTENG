@@ -7,6 +7,37 @@ from PyDAQmx import Task, DAQmxIsTaskDone
 import numpy as np
 from ctypes import byref, c_int32
 
+
+def _find_divisors(n):
+    """Find all divisors of n, sorted"""
+    divisors = set()
+    for i in range(1, int(np.sqrt(n)) + 1):
+        if n % i == 0:
+            divisors.add(i)
+            divisors.add(n // i)
+    return sorted(divisors)
+
+
+def _get_daq_internal_buffer_size(task_sampling_rate):
+    """
+    Calculate the internal DAQ buffer size based on the task sampling rate.
+
+    Rules:
+    - 0-100 Hz: 1,000
+    - 101-10,000 Hz: 10,000
+    - 10,001-1,000,000 Hz: 100,000
+    - >1,000,000 Hz: 1,000,000
+    """
+    if task_sampling_rate <= 100:
+        return 1000
+    elif task_sampling_rate <= 10000:
+        return 10000
+    elif task_sampling_rate <= 1000000:
+        return 100000
+    else:
+        return 1000000
+
+
 class DAQTaskBase(Task):
     def __init__(self,
                  TASK,
@@ -32,13 +63,13 @@ class DAQTaskBase(Task):
         TASK["DAQ_TASK_REFERENCE"] = self
 
         # Get internal DAQ buffer size based on total sampling rate
-        internal_buffer_size = self._get_daq_internal_buffer_size(self.SAMPLE_RATE)
+        internal_buffer_size = _get_daq_internal_buffer_size(self.SAMPLE_RATE)
 
         # Calculate initial SAMPLES_PER_CALLBACK
         initial_samples_per_callback = int(self.SAMPLE_RATE/ DAQ_USB_TRANSFER_FREQUENCY)
 
         # Find divisors of internal buffer size
-        divisors_of_internal_buffer = self._find_divisors(internal_buffer_size)
+        divisors_of_internal_buffer = _find_divisors(internal_buffer_size)
 
         # Pick the divisor closest to initial_samples_per_callback
         samples_per_callback = min(divisors_of_internal_buffer,
@@ -77,41 +108,6 @@ class DAQTaskBase(Task):
         # Connect with the main window
         self.mainWindow = AcquisitionProgramReference
 
-        # Apply conversion factors only when at least one of the factors is not None
-        conv_factors = [ch[0]["conversion_factor"] for ch in self.CHANNELS.values()]
-        self.xApplyFactors = any(v is not None for v in conv_factors)
-
-        if self.TRIGGER_SOURCE:
-            self.CfgDigEdgeStartTrig(self.TRIGGER_SOURCE, DAQmx_Val_Rising)
-
-    def _get_daq_internal_buffer_size(self, task_sampling_rate):
-        """
-        Calculate the internal DAQ buffer size based on the task sampling rate.
-
-        Rules:
-        - 0-100 Hz: 1,000
-        - 101-10,000 Hz: 10,000
-        - 10,001-1,000,000 Hz: 100,000
-        - >1,000,000 Hz: 1,000,000
-        """
-        if task_sampling_rate <= 100:
-            return 1000
-        elif task_sampling_rate <= 10000:
-            return 10000
-        elif task_sampling_rate <= 1000000:
-            return 100000
-        else:
-            return 1000000
-
-    def _find_divisors(self, n):
-        """Find all divisors of n, sorted"""
-        divisors = set()
-        for i in range(1, int(np.sqrt(n)) + 1):
-            if n % i == 0:
-                divisors.add(i)
-                divisors.add(n // i)
-        return sorted(divisors)
-
 
 class AnalogRead(DAQTaskBase):
     def __init__(self, **kwargs):
@@ -126,14 +122,12 @@ class AnalogRead(DAQTaskBase):
                                      DAQmx_Val_Volts,
                                      None)
 
+        # Define the task parameters
         self.CfgSampClkTiming("", self.SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, self.SAMPLES_PER_CALLBACK)
         self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, self.SAMPLES_PER_CALLBACK, 0)
 
-        # Conversion factor vector:
-        self.conv_factors = np.array([
-            channel[0]["conversion_factor"] if channel[0]["conversion_factor"] is not None else 1
-            for channel in list(self.CHANNELS.values())
-        ], dtype=np.float64)
+        if self.TRIGGER_SOURCE:
+            self.CfgDigEdgeStartTrig(self.TRIGGER_SOURCE, DAQmx_Val_Rising)
 
         # Determine buffer data type
         self.data = np.empty((self.SAMPLES_PER_CALLBACK, self.number_channels), dtype=np.float64)
@@ -151,10 +145,6 @@ class AnalogRead(DAQTaskBase):
                 return
 
             if self.mainWindow.moveLinMot[0]:
-
-                # Multiply by the conversion_factor if necessary (using in-place multiplication):
-                if self.xApplyFactors:
-                    self.data *= self.conv_factors
 
                 # Store data in the plot buffer
                 self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK, :] = self.data
@@ -219,14 +209,11 @@ class DigitalRead(DAQTaskBase):
         self.CfgSampClkTiming("", self.SAMPLE_RATE, DAQmx_Val_Rising, DAQmx_Val_ContSamps, self.SAMPLES_PER_CALLBACK)
         self.AutoRegisterEveryNSamplesEvent(DAQmx_Val_Acquired_Into_Buffer, self.SAMPLES_PER_CALLBACK, 0)
 
+        if self.TRIGGER_SOURCE:
+            self.CfgDigEdgeStartTrig(self.TRIGGER_SOURCE, DAQmx_Val_Rising)
+
         # Define the line shifts:
         self.shifts = np.array(lines_index, dtype=np.uint32)
-
-        # Conversion factor vector:
-        self.conv_factors = np.array([
-            channel[0]["conversion_factor"] if channel[0]["conversion_factor"] is not None else 1
-            for channel in list(self.CHANNELS.values())
-        ], dtype=np.uint32)
 
         # Determine buffer data type
         self.data = np.empty((self.SAMPLES_PER_CALLBACK, self.number_channels), dtype=np.uint32)
@@ -247,10 +234,6 @@ class DigitalRead(DAQTaskBase):
 
                 # Right-Shift correction (assuming 1 line per channel) and doing it in-place
                 self.data >>= self.shifts
-
-                # Multiply by the conversion_factor if necessary (using in-place multiplication):
-                if self.xApplyFactors:
-                    self.data *= self.conv_factors
 
                 self.plot_buffer[self.write_index:self.write_index + self.SAMPLES_PER_CALLBACK, :] = self.data
                 self.write_index = (self.write_index + self.SAMPLES_PER_CALLBACK) % self.PLOT_BUFFER_SIZE

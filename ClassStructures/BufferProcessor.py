@@ -61,8 +61,11 @@ class BufferProcessor(QObject):
 
     def remove_file(self):
         if os.path.exists(self.file_path):
+            if not self.file_handle.closed:
+                self.file_handle.close()
             os.remove(self.file_path)
-            print(f"File DAQ_{self.task_name}_{self.task_type}.bin has been closed")
+            self.file_handle = None
+            print(f"File DAQ_{self.task_name}_{self.task_type}.bin has been deleted")
         else:
             print(f"Error: File DAQ_{self.task_name}_{self.task_type}.bin not found.")
 
