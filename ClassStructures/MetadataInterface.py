@@ -30,6 +30,13 @@ class MetadataInterface:
                     channel["port_config"] = self._normalize_port_config(channel["port_config"])
         return DAQ_TASKS_METADATA
 
+    def _get_metadata_tree_value(self, column_name):
+        param = self.mainWindow.ExpConfigWindow.metadata_param_tree.param(column_name)
+        if param is not None:
+            return param.value()
+        else:
+            return None
+
     def build_experiment_metadata(self):
         """Build the experiment metadata split into Excel and JSON payloads."""
         try:
@@ -46,16 +53,10 @@ class MetadataInterface:
                 continue
 
             if col == 'ReadingTime (s)':
-                excel_metadata[col] = self.mainWindow.measure_time  # determined by software
+                excel_metadata[col] = self.mainWindow.measure_time  # determined by the software QSpinBox
                 continue
 
-            param = self.mainWindow.ExpConfigWindow.metadata_param_tree.param(col)
-            if param is not None:
-                val = param.value()
-            else:
-                val = None
-
-            excel_metadata[col] = val
+            excel_metadata[col] = self._get_metadata_tree_value(col)
 
         json_metadata = {
             "ExperimentId": self.mainWindow.exp_id,
@@ -187,8 +188,7 @@ class MetadataInterface:
 
             sheet_row = {}
             for header in list(self.mainWindow.METADATA_COLUMNS.keys()):
-                default = self.mainWindow.METADATA_COLUMNS.get(header, {}).get('default', "")
-                val = excel_metadata.get(header, default)
+                val = excel_metadata.get(header)
                 sheet_row[header] = self._normalize_cell_value(val)
 
             for header, value in sheet_row.items():

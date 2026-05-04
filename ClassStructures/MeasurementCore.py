@@ -184,23 +184,23 @@ class AcquisitionProgram(QWidget):
             if not isinstance(tribu_id, str):
                 tribu_id = str(tribu_id)
             # If provided as parameter, set the live value in METADATA_COLUMNS
-            self.METADATA_COLUMNS["TribuId"]["default"] = tribu_id
+            self.METADATA_COLUMNS["TribuId"]["value"] = tribu_id
             self.tribu_id = tribu_id
         else:
             # Read current value from METADATA_COLUMNS
-            self.tribu_id = self.METADATA_COLUMNS["TribuId"]["default"]
+            self.tribu_id = self.METADATA_COLUMNS["TribuId"]["value"]
 
         # Manage RloadId via METADATA_COLUMNS.
         if rload_id:
             if not isinstance(rload_id, str):
                 rload_id = str(rload_id)
             # If provided as parameter, set the live value in METADATA_COLUMNS
-            self.METADATA_COLUMNS["RloadId"]["default"]  = rload_id
+            self.METADATA_COLUMNS["RloadId"]["value"]  = rload_id
             self.rload_id = rload_id
         else:
             if not self.automatic_mode:
                 # Read current value from METADATA_COLUMNS
-                self.rload_id = self.METADATA_COLUMNS["RloadId"]["default"]
+                self.rload_id = self.METADATA_COLUMNS["RloadId"]["value"]
             else:
                 self.rload_id = None
 
@@ -560,45 +560,34 @@ class AcquisitionProgram(QWidget):
             self.dev_communicator.stop_acquisition_signal.emit()
         else:
             # START ADQUISITION
-            # Acquire rload_id from ExpConfigWindow Parameter Tree (preferred) when starting
-            exp_cfg = getattr(self, 'ExpConfigWindow', None)
             if self.automatic_mode:
-                # automatic mode: take rload from RESISTANCE_DATA and write it into the ParamTree
+                # automatic mode: take rload from RESISTANCE_DATA and write it into the Parameter Tree
                 self.rload_id = self.RESISTANCE_DATA[self.iteration_index]["RLOAD_ID"]
-                try:
-                    if exp_cfg is not None and getattr(exp_cfg, 'metadata_param_tree', None) is not None:
-                        p = exp_cfg.metadata_param_tree.param('RloadId')
-                        if p is not None:
-                            p.setValue(self.rload_id)
-                except Exception:
-                    pass
+                p = self.ExpConfigWindow.metadata_param_tree.param('RloadId')
+                if p is not None:
+                    p.setValue(self.rload_id)
             else:
-                # manual mode: read rload_id from the parameter tree (must not be empty)
-                self.rload_id = None
-                try:
-                    if exp_cfg is not None and getattr(exp_cfg, 'metadata_param_tree', None) is not None:
-                        p = exp_cfg.metadata_param_tree.param('RloadId')
-                        if p is not None:
-                            self.rload_id = p.value()
-                except Exception:
+                # manual mode: read rload_id from the Parameter Tree (must not be empty)
+                p_RloadId = self.ExpConfigWindow.metadata_param_tree.param('RloadId')
+                if p_RloadId is not None:
+                    self.rload_id = p_RloadId.value()
+                else:
                     self.rload_id = None
 
-                if not self.rload_id:
-                    QMessageBox.critical(self, "Missing RloadId", "RloadId is required. Open 'Edit Experiment Defaults' and set RloadId in the parameter tree.")
-                    print("\nNo RloadId found in parameter tree (ExpConfigWindow).")
-                    return
+            if not self.rload_id:
+                QMessageBox.critical(self, "Missing RloadId", "RloadId is required. Open 'Edit Experiment Defaults' and set RloadId in the Parameter Tree.")
+                print("\nNo RloadId found in parameter tree (ExpConfigWindow).")
+                return
 
-            # Ensure tribu_id is available from the parameter tree (must not be empty)
-            try:
-                if exp_cfg is not None and getattr(exp_cfg, 'metadata_param_tree', None) is not None:
-                    ptrib = exp_cfg.metadata_param_tree.param('TribuId')
-                    if ptrib is not None:
-                        self.tribu_id = ptrib.value()
-            except Exception:
-                pass
+            # Ensure tribu_id is available from the Parameter Tree (must not be empty)
+            pTribuId = self.ExpConfigWindow.metadata_param_tree.param('TribuId')
+            if pTribuId is not None:
+                self.tribu_id = pTribuId.value()
+            else:
+                self.tribu_id = None
 
             if not self.tribu_id:
-                QMessageBox.critical(self, "Missing TribuId", "TribuId is required. Open 'Edit Experiment Defaults' and set TribuId in the parameter tree.")
+                QMessageBox.critical(self, "Missing TribuId", "TribuId is required. Open 'Edit Experiment Defaults' and set TribuId in the Parameter Tree.")
                 print("\nNo TribuId found in parameter tree (ExpConfigWindow).")
                 return
 

@@ -1,7 +1,47 @@
 from PyQt5.QtWidgets import (QPushButton, QVBoxLayout,
-                             QHBoxLayout, QDialog)
+                             QHBoxLayout, QDialog, QPlainTextEdit)
+from PyQt5.QtCore import pyqtSignal
 
 from pyqtgraph.parametertree import Parameter, ParameterTree
+from pyqtgraph.parametertree.parameterTypes import WidgetParameterItem
+
+class TextEditWidget(QPlainTextEdit):
+    """QPlainTextEdit with sigChanged signal for compatibility with WidgetParameterItem."""
+    sigChanged = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.textChanged.connect(self.sigChanged.emit)
+
+    def setValue(self, value):
+        """Set the text of the widget."""
+        if value is not None:
+            self.setPlainText(str(value))
+        else:
+            self.setPlainText("")
+
+    def value(self):
+        """Return the current text value."""
+        return self.toPlainText()
+
+class TextParameterItem(WidgetParameterItem):
+    """Custom parameter item that uses TextEditWidget for multi-line text input."""
+
+    def makeWidget(self):
+        w = TextEditWidget()
+        w.setMaximumHeight(120)
+        w.setMinimumHeight(100)
+        initial_value = str(self.param.value()) if self.param.value() is not None else ""
+        w.setPlainText(initial_value)
+        w.sigChanged.connect(lambda: self.param.setValue(w.toPlainText()))
+        return w
+
+class TextParameter(Parameter):
+    """Custom Parameter type for multi-line text."""
+    itemClass = TextParameterItem
+
+    def __init__(self, **opts):
+        super().__init__(**opts)
 
 class ExpConfigWindow(QDialog):
     def __init__(self, METADATA_COLUMNS, parent=None):
@@ -13,23 +53,26 @@ class ExpConfigWindow(QDialog):
             if col in ('Date', 'ReadingTime (s)'):
                 continue  # Auto-generated and must not be editable in the dialog.
             ptype = meta.get('type', 'str')
-            if ptype not in ('str', 'int', 'float', 'bool', 'list'):
+            if ptype not in ('str', 'int', 'float', 'bool', 'list', 'text'):
                 ptype = 'str'
-            children.append({'name': col, 'type': ptype, 'value': meta.get('default', '')})
+            # Keep Notes as 'str' initially, will replace with TextParameter later
+            default = meta.get('default', None)
+            value = meta.get('value', None)
+            limits = meta.get('limit', None)
+            children.append({'name': col, 'type': ptype, 'value': value, 'default': default, "limits": limits})
 
         self.metadata_param_tree = Parameter.create(name='ExperimentDefaults', type='group', children=children)
-        self.METADATA_COLUMNS = METADATA_COLUMNS
 
-        # Backup current values
-        orig = {}
-        for col in list(METADATA_COLUMNS.keys()):
-            if col in ('Date', 'ReadingTime (s)'):
-                continue
-            try:
-                p = self.metadata_param_tree.param(col)
-                orig[col] = p.value() if p is not None else None
-            except Exception:
-                orig[col] = None
+        # Replace Notes parameter with TextParameter for multi-line text
+        notes_param = self.metadata_param_tree.param('Notes')
+        if notes_param is not None:
+            notes_value = notes_param.value()
+            self.metadata_param_tree.removeChild(notes_param)
+            text_param = TextParameter(name='Notes', type='text', value=notes_value)
+            self.metadata_param_tree.addChild(text_param)
+
+        self.METADATA_COLUMNS = METADATA_COLUMNS
+        self._snapshot_values = {}
 
         self.setWindowTitle("Edit Experiment Defaults")
         self.setMinimumSize(700, 500)
@@ -86,42 +129,37 @@ class ExpConfigWindow(QDialog):
         btn_layout.addWidget(btn_cancel)
         dlg_layout.addLayout(btn_layout)
 
-        def on_cancel():
-            # restore originals
-            for col, val in orig.items():
-                try:
-                    p = self.metadata_param_tree.param(col)
-                    if p is not None:
-                        p.setValue(val)
-                except Exception:
-                    pass
-            self.reject()
+        btn_save.clicked.connect(self.accept)
+        btn_cancel.clicked.connect(self.reject)
 
-        def on_save():
-            tribu_param = self.metadata_param_tree.param('TribuId')
-            rload_param = self.metadata_param_tree.param('RloadId')
+        # Capture the current committed values as the initial rollback snapshot.
+        self._capture_snapshot()
 
-            if tribu_param is not None:
-                self.tribu_id = tribu_param.value()
-                # Persist live value into METADATA_COLUMNS so callers can read current value
-                try:
-                    self.METADATA_COLUMNS.setdefault('TribuId', {})['value'] = self.tribu_id
-                except Exception:
-                    pass
-            else:
-                self.tribu_id = None
+    def _iter_editable_columns(self):
+        for col in self.METADATA_COLUMNS.keys():
+            if col in ('Date', 'ReadingTime (s)'):
+                continue
+            yield col
 
-            if rload_param is not None:
-                self.rload_id = rload_param.value()
-                try:
-                    self.METADATA_COLUMNS.setdefault('RloadId', {})['value'] = self.rload_id
-                except Exception:
-                    pass
-            else:
-                self.rload_id = None
+    def _capture_snapshot(self):
+        self._snapshot_values = {}
+        for col in self._iter_editable_columns():
+            param = self.metadata_param_tree.param(col)
+            self._snapshot_values[col] = param.value() if param is not None else None
 
-            self.accept()
+    def _restore_snapshot(self):
+        for col, value in self._snapshot_values.items():
+            param = self.metadata_param_tree.param(col)
+            if param is None:
+                continue
+            param.setValue(value)
 
-        btn_cancel.clicked.connect(on_cancel)
-        btn_save.clicked.connect(on_save)
+    def showEvent(self, event):
+        self._capture_snapshot()
+        super().showEvent(event)
+
+    def done(self, result):
+        if result != QDialog.Accepted:
+            self._restore_snapshot()
+        super().done(result)
 
