@@ -17,7 +17,7 @@ R_LOAD_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS":{
-            "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff, "conversion_source": "keithley", "conversion_factor": None},
+            "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff, "conversion_source": "none", "conversion_factor": None},
         },
 
         "TRIGGER_SOURCE": "PFI0",
@@ -109,24 +109,24 @@ DAQ_PROFILES = {
 }
 
 METADATA_COLUMNS = {
-    "TribuId": {"default": "Nylon6-PDMS", "type": "str", "limits": None},
-    "Keithley Used": {"default": False, "type": "bool", "limits": None},
-    "Date": {"default": None, "type": "date", "limits": None},
-    "Capacitorld": {"default": "none", "type": "str", "limits": None},
-    "RloadId": {"default": "R100", "type": "str", "limits": None},
-    "InitialPosition": {"default": -54.0, "type": "float", "limits": None},
-    "FinalPosition": {"default": -59.4, "type": "float", "limits": None},
-    "MeasuredParameterMotor": {"default": "Pos(mm), F(N), Target Force(N)", "type": "str", "limits": None},
-    "ReadingTime (s)": {"default": 0, "type": "int", "limits": [0, None]},
-    "Electrode rGO": {"default": False, "type": "bool", "limits": None},
-    "MotorSpeedDown(m/s)": {"default": 0.5, "type": "float", "limits": None},
-    "MotorAccelerationDown(m/s)": {"default": 0.5, "type": "float", "limits": None},
-    "MotorDecelerationDown(m/s)": {"default": 0.5, "type": "float", "limits": None},
-    "Motor Speed Up(m/s)": {"default": 0.5, "type": "float", "limits": None},
-    "Motor AccelerationUp(m/s)": {"default": 0.5, "type": "float", "limits": None},
-    "MotorDecelerationUp(m/s)": {"default": 0.5, "type": "float", "limits": None},
-    "MotorForceMax": {"default": 0.0, "type": "float", "limits": None},
-    "Notes": {"default": "", "type": "str", "limits": None},
+    "TribuId": {"default": "", "value": "", "type": "str", "limits": None},
+    "Keithley Used": {"default": False, "value": False, "type": "bool", "limits": None},
+    "Date": {"default": None, "value": None, "type": "date", "limits": None},
+    "Capacitorld": {"default": "none", "value": "none", "type": "str", "limits": None},
+    "RloadId": {"default": "", "value": "", "type": "str", "limits": None},
+    "InitialPosition": {"default": -54.0, "value": -54.0, "type": "float", "limits": None},
+    "FinalPosition": {"default": -59.4, "value": -59.4, "type": "float", "limits": None},
+    "MeasuredParameterMotor": {"default": "", "value": "Pos(mm), F(N), Target Force(N)", "type": "str", "limits": None},
+    "ReadingTime (s)": {"default": 0, "value": 0, "type": "int", "limits": [0, None]},
+    "Electrode rGO": {"default": False, "value": False, "type": "bool", "limits": None},
+    "MotorSpeedDown(m/s)": {"default": 0.5, "value": 0.5, "type": "float", "limits": None},
+    "MotorAccelerationDown(m/s)": {"default": 0.5, "value": 0.5, "type": "float", "limits": None},
+    "MotorDecelerationDown(m/s)": {"default": 0.5, "value": 0.5, "type": "float", "limits": None},
+    "Motor Speed Up(m/s)": {"default": 0.5, "value": 0.5, "type": "float", "limits": None},
+    "Motor AccelerationUp(m/s)": {"default": 0.5, "value": 0.5, "type": "float", "limits": None},
+    "MotorDecelerationUp(m/s)": {"default": 0.5, "value": 0.5, "type": "float", "limits": None},
+    "MotorForceMax": {"default": 0.0, "value": 0.0, "type": "float", "limits": None},
+    "Notes": {"default": "", "value": "", "type": "str", "limits": None},
 }
 
 resistance_list = [{'VALUE': 5,

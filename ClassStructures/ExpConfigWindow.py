@@ -103,11 +103,20 @@ class ExpConfigWindow(QDialog):
 
             if tribu_param is not None:
                 self.tribu_id = tribu_param.value()
+                # Persist live value into METADATA_COLUMNS so callers can read current value
+                try:
+                    self.METADATA_COLUMNS.setdefault('TribuId', {})['value'] = self.tribu_id
+                except Exception:
+                    pass
             else:
                 self.tribu_id = None
 
             if rload_param is not None:
                 self.rload_id = rload_param.value()
+                try:
+                    self.METADATA_COLUMNS.setdefault('RloadId', {})['value'] = self.rload_id
+                except Exception:
+                    pass
             else:
                 self.rload_id = None
 

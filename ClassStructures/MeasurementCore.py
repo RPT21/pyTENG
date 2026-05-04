@@ -179,22 +179,30 @@ class AcquisitionProgram(QWidget):
                 return
             self.exp_dir = os.path.normpath(self.exp_dir)
 
-        # Request TribuId
+        # Manage TribuId via METADATA_COLUMNS.
         if tribu_id:
+            if not isinstance(tribu_id, str):
+                tribu_id = str(tribu_id)
+            # If provided as parameter, set the live value in METADATA_COLUMNS
+            self.METADATA_COLUMNS["TribuId"]["default"] = tribu_id
             self.tribu_id = tribu_id
         else:
-            print("Please enter TribuId.")
-            self.tribu_id, ok = QInputDialog.getText(self, "Input", "Enter TribuId:")
-            if not ok or not self.tribu_id:
-                print("No TribuId entered. Exiting.")
-                self.xClose = True
-                return
+            # Read current value from METADATA_COLUMNS
+            self.tribu_id = self.METADATA_COLUMNS["TribuId"]["default"]
 
-        # Set rload_id if given:
-        if rload_id and not self.automatic_mode:
+        # Manage RloadId via METADATA_COLUMNS.
+        if rload_id:
+            if not isinstance(rload_id, str):
+                rload_id = str(rload_id)
+            # If provided as parameter, set the live value in METADATA_COLUMNS
+            self.METADATA_COLUMNS["RloadId"]["default"]  = rload_id
             self.rload_id = rload_id
         else:
-            self.rload_id = None
+            if not self.automatic_mode:
+                # Read current value from METADATA_COLUMNS
+                self.rload_id = self.METADATA_COLUMNS["RloadId"]["default"]
+            else:
+                self.rload_id = None
 
         ### ---------------- UI ELEMENTS ---------------- ###
 
@@ -552,14 +560,47 @@ class AcquisitionProgram(QWidget):
             self.dev_communicator.stop_acquisition_signal.emit()
         else:
             # START ADQUISITION
+            # Acquire rload_id from ExpConfigWindow Parameter Tree (preferred) when starting
+            exp_cfg = getattr(self, 'ExpConfigWindow', None)
             if self.automatic_mode:
+                # automatic mode: take rload from RESISTANCE_DATA and write it into the ParamTree
                 self.rload_id = self.RESISTANCE_DATA[self.iteration_index]["RLOAD_ID"]
-            elif not self.rload_id:
-                print("\nPlease enter RloadId")
-                self.rload_id, ok = QInputDialog.getText(self, "Input", "Enter RloadId:")
-                if not ok or not self.rload_id:
-                    print("No RloadId entered. Operation canceled.")
+                try:
+                    if exp_cfg is not None and getattr(exp_cfg, 'metadata_param_tree', None) is not None:
+                        p = exp_cfg.metadata_param_tree.param('RloadId')
+                        if p is not None:
+                            p.setValue(self.rload_id)
+                except Exception:
+                    pass
+            else:
+                # manual mode: read rload_id from the parameter tree (must not be empty)
+                self.rload_id = None
+                try:
+                    if exp_cfg is not None and getattr(exp_cfg, 'metadata_param_tree', None) is not None:
+                        p = exp_cfg.metadata_param_tree.param('RloadId')
+                        if p is not None:
+                            self.rload_id = p.value()
+                except Exception:
+                    self.rload_id = None
+
+                if not self.rload_id:
+                    QMessageBox.critical(self, "Missing RloadId", "RloadId is required. Open 'Edit Experiment Defaults' and set RloadId in the parameter tree.")
+                    print("\nNo RloadId found in parameter tree (ExpConfigWindow).")
                     return
+
+            # Ensure tribu_id is available from the parameter tree (must not be empty)
+            try:
+                if exp_cfg is not None and getattr(exp_cfg, 'metadata_param_tree', None) is not None:
+                    ptrib = exp_cfg.metadata_param_tree.param('TribuId')
+                    if ptrib is not None:
+                        self.tribu_id = ptrib.value()
+            except Exception:
+                pass
+
+            if not self.tribu_id:
+                QMessageBox.critical(self, "Missing TribuId", "TribuId is required. Open 'Edit Experiment Defaults' and set TribuId in the parameter tree.")
+                print("\nNo TribuId found in parameter tree (ExpConfigWindow).")
+                return
 
             # Check if Keithley is required but not available
             if self._daq_tasks_require_keithley():
