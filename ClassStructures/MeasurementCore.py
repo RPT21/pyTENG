@@ -154,8 +154,6 @@ class AcquisitionProgram(QWidget):
         self.xClose = False
         self.mainWindowButtons = mainWindowButtons
         self.mainWindowParamGroups = mainWindowParamGroups
-        self.actual_plotter = None
-        self.index_pointer = None
         self.local_path = [""]
 
         # Check RESISTANCE_DATA when automatic_mode enabled
@@ -346,9 +344,7 @@ class AcquisitionProgram(QWidget):
 
     def _close_runtime_daq_resources(self):
 
-        # Disconnect plotter and index pointer from the Acquisition Graph to avoid errors when closing DAQ tasks
-        self.actual_plotter = None
-        self.index_pointer = None
+        # Disconnect plotter from the Acquisition Graph to avoid errors when closing DAQ tasks
         self.plot_widget.flush_screen()
 
         # Remove Acquisition Tasks
@@ -463,8 +459,7 @@ class AcquisitionProgram(QWidget):
             self.should_save_data = False
 
             # Assign the plotter to the selected signal
-            selected = self.signal_selector.value()
-            self.actual_plotter = selected[-2] if selected else None
+            self.plot_widget.update_DAQ_Plot_Buffer()
 
             self.update_button()
             print("The acquisition has started successfully!")

@@ -77,9 +77,10 @@ class AcquisitionGraph(pg.PlotWidget):
         # Set initial axis ranges: Y-axis from -10 to 10V, X-axis from 0 to TimeWindowLength
         self.setYRange(-10, 10)
         self.setXRange(0, self.TimeWindowLength)
+        self.time_axis = None
 
 
-    def update_DAQ_Plot_Buffer(self, *args):
+    def update_DAQ_Plot_Buffer(self):
         selected = self.signal_selector.value()
         if not selected:
             self.actual_plotter = None
@@ -120,6 +121,10 @@ class AcquisitionGraph(pg.PlotWidget):
         # Select the actual plotter
         self.actual_plotter = DAQ_Task_Reference
 
+        # Remake the time axis from 0 to TimeWindowLength
+        plot_buffer_size = self.actual_plotter.PLOT_BUFFER_SIZE
+        self.time_axis = np.linspace(0, self.TimeWindowLength, plot_buffer_size)
+
     def flush_screen(self):
         self.actual_plotter = None
         self.curve.setData([])
@@ -138,6 +143,5 @@ class AcquisitionGraph(pg.PlotWidget):
         self.display_data[:tail_size] = plot_buffer[write_index:, self.index_pointer]
         self.display_data[tail_size:] = plot_buffer[:write_index, self.index_pointer]
 
-        # Create time axis from 0 to TimeWindowLength
-        time_axis = np.linspace(0, self.TimeWindowLength, plot_buffer_size)  # S'ha de modificar que no es crei cada vegada, sino que es mantingui i només s'actualitzi si el plot_buffer_size canvia
-        self.curve.setData(time_axis, self.display_data)
+        # Set the data to the curve for plotting
+        self.curve.setData(self.time_axis, self.display_data)
