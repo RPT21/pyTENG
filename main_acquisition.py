@@ -47,7 +47,7 @@ OPEN_CIRCUIT_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS": {
-            "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff, "conversion_source": "none", "conversion_factor": None},
+            "Voltage": {"port": "Dev1/ai2", "port_config": DAQmx_Val_Diff, "conversion_source": "none", "conversion_factor": None},
         },
 
         # "TRIGGER_SOURCE": "PFI0",
@@ -149,7 +149,7 @@ debug = True
 tribo_lab = True
 if debug:
     if tribo_lab:
-        exp_dir = r"C:\Users\rpieres\Documents\TENG_Project_SaveFolder"
+        exp_dir = r"C:\Users\mmartic\Desktop\RogerTest"
     else:
         exp_dir = r"C:\Users\rpieres\Desktop\Test"
     tribu_id = "PDMSvsNylon"
@@ -168,6 +168,7 @@ window = AcquisitionProgram(DAQ_PROFILES=DAQ_PROFILES,
                             tribu_id=tribu_id,
                             rload_id=rload_id,
                             use_keithley=False,
-                            use_raspberry=True)
+                            use_raspberry=True,
+                            keithley_resource_name='GPIB0::14::INSTR')
 window.show()
 sys.exit(app.exec_())
