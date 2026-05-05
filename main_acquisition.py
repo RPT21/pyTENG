@@ -17,7 +17,7 @@ R_LOAD_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS":{
-            "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff, "conversion_source": "none", "conversion_factor": None},
+            "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff, "conversion_source": "none", "conversion_factor": None, "keithley_sense": "none"},
         },
 
         "TRIGGER_SOURCE": "PFI0",
@@ -31,8 +31,8 @@ R_LOAD_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS":{
-            "LinMot_Enable": {"port":"Dev2/port0/line0", "port_config":None, "conversion_source": "none", "conversion_factor": None},
-            "LinMot_Up_Down": {"port":"Dev2/port0/line1", "port_config":None, "conversion_source": "none", "conversion_factor": None}
+            "LinMot_Enable": {"port":"Dev2/port0/line0", "port_config":None, "conversion_source": "none", "conversion_factor": None, "keithley_sense": "none"},
+            "LinMot_Up_Down": {"port":"Dev2/port0/line1", "port_config":None, "conversion_source": "none", "conversion_factor": None, "keithley_sense": "none"}
         },
 
         # "TRIGGER_SOURCE": "PFI0",
@@ -47,7 +47,7 @@ OPEN_CIRCUIT_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS": {
-            "Voltage": {"port": "Dev1/ai2", "port_config": DAQmx_Val_Diff, "conversion_source": "none", "conversion_factor": None},
+            "Voltage": {"port": "Dev1/ai2", "port_config": DAQmx_Val_Diff, "conversion_source": "keithley", "conversion_factor": None, "keithley_sense": "voltage"},
         },
 
         # "TRIGGER_SOURCE": "PFI0",
@@ -61,8 +61,8 @@ OPEN_CIRCUIT_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS": {
-            "LinMot_Enable": {"port": "Dev2/port0/line0", "port_config": None, "conversion_source": "none", "conversion_factor": None},
-            "LinMot_Up_Down": {"port": "Dev2/port0/line1", "port_config": None, "conversion_source": "none", "conversion_factor": None}
+            "LinMot_Enable": {"port": "Dev2/port0/line0", "port_config": None, "conversion_source": "none", "conversion_factor": None, "keithley_sense": "none"},
+            "LinMot_Up_Down": {"port": "Dev2/port0/line1", "port_config": None, "conversion_source": "none", "conversion_factor": None, "keithley_sense": "none"}
         },
 
         # "TRIGGER_SOURCE": "PFI0",
@@ -77,7 +77,7 @@ SHORT_CIRCUIT_CURRENT_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS": {
-            "Current": {"port": "Dev1/ai2", "port_config": DAQmx_Val_RSE, "conversion_source": "none", "conversion_factor": 1},
+            "Current": {"port": "Dev1/ai2", "port_config": DAQmx_Val_RSE, "conversion_source": "keithley", "conversion_factor": None, "keithley_sense": "current"},
         },
 
         # "TRIGGER_SOURCE": "PFI0",
@@ -91,8 +91,8 @@ SHORT_CIRCUIT_CURRENT_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS": {
-            "LinMot_Enable": {"port": "Dev2/port0/line0", "port_config": None, "conversion_source": "none", "conversion_factor": None},
-            "LinMot_Up_Down": {"port": "Dev2/port0/line1", "port_config": None, "conversion_source": "none", "conversion_factor": None}
+            "LinMot_Enable": {"port": "Dev2/port0/line0", "port_config": None, "conversion_source": "none", "conversion_factor": None, "keithley_sense": "none"},
+            "LinMot_Up_Down": {"port": "Dev2/port0/line1", "port_config": None, "conversion_source": "none", "conversion_factor": None, "keithley_sense": "none"},
         },
 
         # "TRIGGER_SOURCE": "PFI0",
@@ -110,7 +110,8 @@ DAQ_PROFILES = {
 
 METADATA_COLUMNS = {
     "TribuId": {"default": "", "value": "", "type": "str", "limits": None},
-    "Keithley Used": {"default": False, "value": False, "type": "bool", "limits": None},
+    "SampleIdTriboPos": {"default": "", "value": "", "type": "str", "limits": None},
+    "SampleIdTriboNeg": {"default": "", "value": "", "type": "str", "limits": None},
     "Date": {"default": None, "value": None, "type": "date", "limits": None},
     "Capacitorld": {"default": "none", "value": "none", "type": "str", "limits": None},
     "RloadId": {"default": "", "value": "", "type": "str", "limits": None},
@@ -167,7 +168,7 @@ window = AcquisitionProgram(DAQ_PROFILES=DAQ_PROFILES,
                             exp_dir=exp_dir,
                             tribu_id=tribu_id,
                             rload_id=rload_id,
-                            use_keithley=False,
+                            use_keithley=True,
                             use_raspberry=True,
                             keithley_resource_name='GPIB0::14::INSTR')
 window.show()

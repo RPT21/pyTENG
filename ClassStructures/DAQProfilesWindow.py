@@ -40,6 +40,16 @@ PORT_CONFIG_OPTIONS = [
 PORT_CONFIG_LABEL_BY_VALUE = {value: label for label, value in PORT_CONFIG_OPTIONS}
 PORT_CONFIG_VALUE_BY_LABEL = {label: value for label, value in PORT_CONFIG_OPTIONS}
 
+KEITHLEY_SENSE_OPTIONS = [
+    ("None", "none"),
+    ("Voltage", "voltage"),
+    ("Current", "current"),
+    ("Impedance", "impedance"),
+    ("Charge", "charge"),
+]
+KEITHLEY_SENSE_LABEL_BY_VALUE = {value: label for label, value in KEITHLEY_SENSE_OPTIONS}
+KEITHLEY_SENSE_VALUE_BY_LABEL = {label: value for label, value in KEITHLEY_SENSE_OPTIONS}
+
 
 def _default_task(task_type="analog"):
     return {
@@ -51,6 +61,7 @@ def _default_task(task_type="analog"):
                 "port_config": DAQmx_Val_Diff if task_type == "analog" else None,
                 "conversion_source": "none",
                 "conversion_factor": None,
+                "keithley_sense": "none",
             }
         },
         "TRIGGER_SOURCE": None,
@@ -269,13 +280,14 @@ class DAQProfilesWindow(QDialog):
         channel_button_row.addStretch(1)
         channel_layout.addLayout(channel_button_row)
 
-        self.channel_table = QTableWidget(0, 5)
+        self.channel_table = QTableWidget(0, 6)
         self.channel_table.setHorizontalHeaderLabels([
             "Channel name",
             "Port",
             "Port config",
             "Conversion source",
             "Conversion factor",
+            "Keithley sense",
         ])
         self.channel_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.channel_table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -284,6 +296,7 @@ class DAQProfilesWindow(QDialog):
         self.channel_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.channel_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.channel_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        self.channel_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeToContents)
         channel_layout.addWidget(self.channel_table)
 
         task_layout.addWidget(channel_group)
@@ -326,6 +339,12 @@ class DAQProfilesWindow(QDialog):
     def _port_config_from_label(self, label):
         return PORT_CONFIG_VALUE_BY_LABEL.get(label, None)
 
+    def _keithley_sense_to_label(self, value):
+        return KEITHLEY_SENSE_LABEL_BY_VALUE.get(str(value).strip().lower(), "None")
+
+    def _keithley_sense_from_label(self, label):
+        return KEITHLEY_SENSE_VALUE_BY_LABEL.get(label, "none")
+
     def _serialize_task_for_file(self, task):
         serialized = copy.deepcopy(task)
         serialized.pop("DAQ_TASK_REFERENCE", None)
@@ -339,7 +358,50 @@ class DAQProfilesWindow(QDialog):
         for channel in deserialized.get("DAQ_CHANNELS", {}).values():
             if isinstance(channel, dict):
                 channel["port_config"] = self._port_config_from_label(channel.get("port_config"))
-        return deserialized
+                channel["keithley_sense"] = self._keithley_sense_from_label(
+                    self._keithley_sense_to_label(channel.get("keithley_sense", "none"))
+                )
+        return self._canonicalize_task_for_compare(deserialized)
+
+    def _canonicalize_task_for_compare(self, task):
+        """Return a normalized copy of a task so equality checks ignore legacy shape differences."""
+        canonical = copy.deepcopy(task)
+        canonical.pop("DAQ_TASK_REFERENCE", None)
+
+        trigger_source = str(canonical.get("TRIGGER_SOURCE", "")).strip()
+        canonical["TRIGGER_SOURCE"] = trigger_source if trigger_source else None
+
+        for channel in canonical.get("DAQ_CHANNELS", {}).values():
+            if not isinstance(channel, dict):
+                continue
+
+            source = str(channel.get("conversion_source", "")).strip().lower()
+            factor = channel.get("conversion_factor", None)
+            sense = self._keithley_sense_from_label(
+                self._keithley_sense_to_label(channel.get("keithley_sense", "none"))
+                )
+
+            if source not in ("none", "custom", "keithley"):
+                if factor in (None, ""):
+                    source = "none"
+                elif isinstance(factor, str) and factor.strip().lower() in ("keithley", "keithley_range"):
+                    source = "keithley"
+                else:
+                    source = "custom"
+
+            channel["conversion_source"] = source
+
+            if source in ("none", "keithley"):
+                channel["conversion_factor"] = None
+            elif source == "custom" and isinstance(factor, str):
+                try:
+                    channel["conversion_factor"] = float(factor)
+                except ValueError:
+                    pass
+
+            channel["keithley_sense"] = sense
+
+        return canonical
 
     def _profile_payload(self):
         return {
@@ -462,6 +524,7 @@ class DAQProfilesWindow(QDialog):
                 "port_config": DAQmx_Val_Diff if self.task_type_combo.currentText() == "analog" else None,
                 "conversion_source": "none",
                 "conversion_factor": None,
+                "keithley_sense": "none",
             })
 
     def _normalized_conversion_source_label(self, channel_config):
@@ -499,6 +562,8 @@ class DAQProfilesWindow(QDialog):
         if row < 0:
             return
 
+        sense_combo = self.channel_table.cellWidget(row, 5)
+
         conversion_item = self.channel_table.item(row, 4)
         if conversion_item is None:
             conversion_item = QTableWidgetItem("")
@@ -507,12 +572,27 @@ class DAQProfilesWindow(QDialog):
         source_label = source_combo.currentText()
         if source_label == "None":
             conversion_item.setText("")
+            if isinstance(sense_combo, QComboBox):
+                sense_combo.setEnabled(False)
+                sense_combo.setCurrentText("None")
         elif source_label == "Keithley":
             # Display hint in the editable cell; parser ignores this cell for Keithley mode.
             conversion_item.setText("range from Keithley")
+            if isinstance(sense_combo, QComboBox):
+                sense_combo.setEnabled(True)
+                if sense_combo.currentText() not in KEITHLEY_SENSE_VALUE_BY_LABEL:
+                    sense_combo.setCurrentText("Voltage")
         elif source_label == "Custom" and conversion_item.text().strip().lower() == "range from keithley":
             conversion_item.setText("")
+            if isinstance(sense_combo, QComboBox):
+                sense_combo.setEnabled(False)
+                sense_combo.setCurrentText("None")
 
+        self._mark_task_editor_dirty()
+
+    def _on_keithley_sense_changed(self, _):
+        if self._suspend_refresh:
+            return
         self._mark_task_editor_dirty()
 
     def _append_channel_row(self, channel_name="Channel 1", channel_config=None):
@@ -531,6 +611,7 @@ class DAQProfilesWindow(QDialog):
         else:
             conversion_text = "" if conversion in (None, "") else str(conversion)
         conversion_item = QTableWidgetItem(conversion_text)
+        sense_value = channel_config.get("keithley_sense", "voltage")
 
         self.channel_table.setItem(row, 0, name_item)
         self.channel_table.setItem(row, 1, port_item)
@@ -547,6 +628,14 @@ class DAQProfilesWindow(QDialog):
         conversion_source_combo.setCurrentText(conversion_source_label)
         conversion_source_combo.currentTextChanged.connect(self._on_conversion_source_changed)
         self.channel_table.setCellWidget(row, 3, conversion_source_combo)
+
+        sense_combo = QComboBox()
+        for label, value in KEITHLEY_SENSE_OPTIONS:
+            sense_combo.addItem(label, value)
+        sense_combo.setCurrentText(self._keithley_sense_to_label(sense_value))
+        sense_combo.currentTextChanged.connect(self._on_keithley_sense_changed)
+        sense_combo.setEnabled(conversion_source_label == "Keithley")
+        self.channel_table.setCellWidget(row, 5, sense_combo)
 
     def _task_from_editor(self):
         task_name = self.task_name_edit.text().strip()
@@ -578,12 +667,16 @@ class DAQProfilesWindow(QDialog):
             conversion_item = self.channel_table.item(row, 4)
             port_combo = self.channel_table.cellWidget(row, 2)
             conversion_source_combo = self.channel_table.cellWidget(row, 3)
+            sense_combo = self.channel_table.cellWidget(row, 5)
 
             channel_name = name_item.text().strip() if name_item else ""
             port = port_item.text().strip() if port_item else ""
             port_config = port_combo.currentData() if isinstance(port_combo, QComboBox) else None
             conversion_text = conversion_item.text().strip() if conversion_item else ""
             conversion_source_label = conversion_source_combo.currentText() if isinstance(conversion_source_combo, QComboBox) else "None"
+            keithley_sense = self._keithley_sense_from_label(
+                sense_combo.currentText() if isinstance(sense_combo, QComboBox) else "Voltage"
+            )
 
             if not channel_name:
                 continue
@@ -612,6 +705,7 @@ class DAQProfilesWindow(QDialog):
                 "port_config": port_config,
                 "conversion_source": conversion_source,
                 "conversion_factor": conversion_factor,
+                "keithley_sense": keithley_sense,
             }
 
         if not channels:
@@ -684,6 +778,9 @@ class DAQProfilesWindow(QDialog):
 
                 conversion_source = str(channel.get("conversion_source", "")).strip().lower()
                 conversion_factor = channel.get("conversion_factor", None)
+                keithley_sense = self._keithley_sense_from_label(
+                    self._keithley_sense_to_label(channel.get("keithley_sense", "voltage"))
+                )
                 if conversion_source not in ("", "none", "custom", "keithley"):
                     raise ValueError(
                         f"Channel '{channel_name}' in task '{task_name}' has invalid conversion_source '{conversion_source}'."
@@ -712,6 +809,10 @@ class DAQProfilesWindow(QDialog):
                         raise ValueError(
                             f"Channel '{channel_name}' in task '{task_name}' must not define conversion_factor when conversion_source is '{conversion_source}'."
                         )
+                    if keithley_sense not in KEITHLEY_SENSE_VALUE_BY_LABEL.values():
+                        raise ValueError(
+                            f"Channel '{channel_name}' in task '{task_name}' has invalid keithley_sense '{keithley_sense}'."
+                        )
 
     def _update_status(self, text):
         self.status_label.setText(text)
@@ -731,7 +832,7 @@ class DAQProfilesWindow(QDialog):
             return True
 
         try:
-            return self._task_from_editor() != tasks[self._current_task_index]
+            return self._canonicalize_task_for_compare(self._task_from_editor()) != self._canonicalize_task_for_compare(tasks[self._current_task_index])
         except Exception:
             return True
 

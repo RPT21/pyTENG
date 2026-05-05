@@ -1,4 +1,5 @@
-from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QMetaObject, Qt, Q_ARG
+from PyQt5.QtWidgets import QMessageBox
 from ClassStructures.RaspberryInterface import RaspberryInterface
 from ClassStructures.KeithleyInterface import KeithleyInterface
 from ClassStructures.DaqInterface import *
@@ -37,9 +38,10 @@ class DeviceCommunicator(QObject):
                                                 username=self.rb_username,
                                                 password=self.rb_password)
 
-            self.is_rb_connected = self.raspberry.connect()
+            if not self.raspberry.connect():
+                self.raspberry = None
         else:
-            self.is_rb_connected = False
+            self.raspberry = None
             print("The program will work without using Raspberry Pi.")
 
         # Connect to Keithley if desired:
@@ -47,9 +49,16 @@ class DeviceCommunicator(QObject):
             self.keithley = KeithleyInterface(resource_name=keithley_resource_name)
             try:
                 device_id = self.keithley.connect(timeout_ms=5000)
+
+                # After connecting to Keithley it is in remote mode and cannot be operated manually
+                self.keithley.set_manual_control()
+
                 print(f"Connected to Keithley: {device_id}")
+
             except Exception as exc:
-                raise RuntimeError(f"Failed to connect to Keithley: {exc}")
+                print(f"\033[91mError, impossible to connect to Keithley: {exc} \033[0m")
+                print("The program will work without using Keithley.")
+                self.keithley = None
         else:
             self.keithley = None
 
@@ -140,14 +149,14 @@ class DeviceCommunicator(QObject):
     def start_acquisition(self, iteration=0):
 
         # Resolve Keithley conversion factors before starting acquisition
-        if self.keithley:
+        if self.keithley and not self.mainWindow.error_flag:
             try:
                 self._resolve_keithley_conversion_factors()
             except Exception as exc:
                 print(f"Failed to resolve Keithley conversion factors:\n{exc}")
                 self.mainWindow.error_flag = True
 
-        if self.is_rb_connected and not self.mainWindow.error_flag:
+        if self.raspberry and not self.mainWindow.error_flag:
 
             # Send a trigger to prepare the Raspberry to record data
             self.DO_task_PrepareRaspberry.set_line(1)
@@ -164,31 +173,67 @@ class DeviceCommunicator(QObject):
                     loop_counter += 1
                 elif status_bit_0 == 1 and status_bit_1 == 0:
                     # OK code
-                    self.mainWindow.error_flag = False
+                    print("Raspberry is ready to record data")
                     break
                 elif status_bit_0 == 0 and status_bit_1 == 1:
                     # Error code
                     self.DO_task_PrepareRaspberry.set_line(0)
                     if iteration == 0:
-                        print("\033[91mError, impossible to prepare raspberry to record, resetting Codesys, please wait... \033[0m")
+                        dictionary = {"title": "Raspberry Connection Error",
+                                      "message": "Impossible to prepare raspberry to record do you want to reset codesys and try again?",
+                                      "result": None
+                                      }
+                        QMetaObject.invokeMethod(self.mainWindow,
+                                                 "ask_reset_codesys",
+                                                 Qt.ConnectionType.BlockingQueuedConnection,
+                                                 Q_ARG(dict, dictionary)
+                                                 )
+                        if dictionary["result"] == QMessageBox.No:
+                            print(f"Acquisition aborted")
+                            return
+
+                        self.mainWindow.acquisition_button.setEnabled(False)
                         self.raspberry.reset_codesys()
-                        self.mainWindow.error_flag = True
                         self.start_acquisition(iteration = 1)
                         return
                     else:
-                        print("\033[91mError, Raspberry is having an issue, check disk space or codesys CSV invalid license error\033[0m")
+                        txt = "Error, Raspberry is having an issue, check disk space or codesys CSV invalid license error"
+                        QMetaObject.invokeMethod(self.mainWindow,
+                                                 "show_raspberry_error",
+                                                 Qt.ConnectionType.QueuedConnection,
+                                                 Q_ARG(str, txt)
+                                                 )
+                        self.mainWindow.error_flag = True
                         break
                 else:
                     # Error code
                     self.DO_task_PrepareRaspberry.set_line(0)
                     if iteration == 0:
-                        print("\033[91mError, EtherCAT bus is not working, resetting Codesys, please wait...\033[0m")
+                        dictionary = {"title":"Raspberry Connection Error",
+                                      "message":"EtherCAT bus is not working, do you want to reset codesys and try again?",
+                                      "result":None
+                                      }
+                        QMetaObject.invokeMethod(self.mainWindow,
+                                                 "ask_reset_codesys",
+                                                 Qt.ConnectionType.BlockingQueuedConnection,
+                                                 Q_ARG(dict, dictionary)
+                                                 )
+                        if dictionary["result"] == QMessageBox.No:
+                            print(f"Acquisition aborted")
+                            return
+
+                        self.mainWindow.acquisition_button.setEnabled(False)
                         self.raspberry.reset_codesys()
-                        self.mainWindow.error_flag = True
                         self.start_acquisition(iteration = 1)
                         return
                     else:
-                        print("\033[91mError, LinMot is not responding, check if the firmware is turned on\033[0m")
+                        txt = "Error, LinMot is not responding, check if the firmware is turned on"
+                        QMetaObject.invokeMethod(self.mainWindow,
+                                                 "show_raspberry_error",
+                                                 Qt.ConnectionType.QueuedConnection,
+                                                 Q_ARG(str, txt)
+                                                 )
+                        self.mainWindow.error_flag = True
                         break
 
                 # Wait time
@@ -196,8 +241,11 @@ class DeviceCommunicator(QObject):
 
             if loop_counter >= max_iter:
                 self.DO_task_PrepareRaspberry.set_line(0)
+                self.mainWindow.error_flag = True
                 print("\033[91mError loop counter overflow, Raspberry is not responding\033[0m")
-                return
+
+            if not self.mainWindow.acquisition_button.isEnabled():
+                self.mainWindow.acquisition_button.setEnabled(True)
 
         if not self.mainWindow.error_flag:
 
@@ -228,7 +276,7 @@ class DeviceCommunicator(QObject):
         self.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
 
         # Wait until raspberry has saved the LinMot_Enable = 0, then stop the DAQ Acquisition
-        if self.is_rb_connected and not self.mainWindow.error_flag:
+        if self.raspberry and not self.mainWindow.error_flag:
 
             loop_counter = 0
             max_iter = 10  # Wait time is 0.1, so it is 1 second
@@ -294,7 +342,7 @@ class DeviceCommunicator(QObject):
                     task.index = 0
 
             # Save the Raspberry data
-            if self.is_rb_connected:
+            if self.raspberry:
                 self.raspberry.download_folder(self.rb_remote_path, local_path=self.mainWindow.local_path[0])
 
             # Continue with the next Resistance Load if the program is in automatic mode (and no error found)
@@ -310,7 +358,7 @@ class DeviceCommunicator(QObject):
                     time.sleep(5)
 
         # Remove the Raspberry files to free disk space
-        if self.is_rb_connected:
+        if self.raspberry:
             self.raspberry.remove_files_with_extension(self.rb_remote_path)
 
         # Reset xRecording
@@ -323,11 +371,8 @@ class DeviceCommunicator(QObject):
         """Resolve Keithley mode channels by querying device range before acquisition.
 
         For each channel with conversion_source='keithley', reads the active measurement
-        range and stores it as the numeric conversion_factor in the DAQ_TASKS dict.
+        range and stores it as the numeric conversion_factor in the DAQ_TASKS and DAQ_TASKS_METADATA dict.
         """
-        keithley_channels = []
-
-        # Identify all channels with Keithley mode
         for task_idx, task in enumerate(self.mainWindow.DAQ_TASKS):
             for channel_name, channel_config_data in task.get("DAQ_CHANNELS", {}).items():
                 # channel_config_data might be [config_dict, index] after DaqInterface initialization
@@ -336,42 +381,35 @@ class DeviceCommunicator(QObject):
                 else:
                     channel_config = channel_config_data
 
+                # Query range for each Keithley channel and update DAQ_TASKS and DAQ_TASKS_METADATA
                 if channel_config.get("conversion_source", "").strip().lower() == "keithley":
-                    keithley_channels.append({
-                        "task_idx": task_idx,
-                        "channel_name": channel_name,
-                        "channel_config": channel_config,
-                        "task_name": task.get("NAME", "Unknown"),
-                    })
+                    keithley_sense = str(channel_config.get("keithley_sense", "none")).strip().lower() or "none"
 
-        if not keithley_channels:
-            return  # No Keithley channels, nothing to do
+                    # Obtain task name
+                    task_name = task.get("NAME")
 
-        # Query range for each Keithley channel and update DAQ_TASKS
-        for channel_info in keithley_channels:
-            try:
-                # Query voltage range (can be extended to support different sense types)
-                measurement_range = self.keithley.read_range(sense="VOLT")
-                conversion_factor = self.keithley.conversion_factor_from_range(
-                    measurement_range)
+                    # Check that the sense is valid
+                    if keithley_sense == "none":
+                        raise Exception("Keithley 'none' sense is not supported, please specify a valid sense "
+                                        "(e.g., 'current', 'voltage', etc.) in the channel configuration.")
 
-                # Directly update in DAQ_TASKS dict
-                task = self.mainWindow.DAQ_TASKS[channel_info["task_idx"]]
-                channel_config_data = task["DAQ_CHANNELS"][channel_info["channel_name"]]
+                    try:
+                        # Query the range that matches the configured measurement type
+                        measurement_range = self.keithley.read_range(sense=keithley_sense, manual_control=False)
+                        conversion_factor = self.keithley.get_conversion_factor_from_keithley(sense=keithley_sense,
+                                                                                              manual_control=True)
 
-                # Handle both formats: direct dict or [dict, index]
-                if isinstance(channel_config_data, list):
-                    channel_config_data[0]["conversion_factor"] = conversion_factor
-                else:
-                    channel_config_data["conversion_factor"] = conversion_factor
+                        # Update the DAQ_TASKS dict:
+                        channel_config["conversion_factor"] = conversion_factor
 
-                print(
-                    f"Resolved Keithley range for task '{channel_info['task_name']}' "
-                    f"channel '{channel_info['channel_name']}': {measurement_range} V -> "
-                    f"conversion_factor = {conversion_factor}"
-                )
-            except Exception as exc:
-                raise RuntimeError(
-                    f"Failed to read Keithley range for channel "
-                    f"'{channel_info['channel_name']}': {exc}"
-                )
+                        # Also update DAQ_TASKS_METADATA list so it gets saved to the JSON sidecar
+                        task_metadata = self.mainWindow.DAQ_TASKS_METADATA[task_idx]
+                        channel_config_data_metadata = task_metadata["DAQ_CHANNELS"][channel_name]
+                        channel_config_data_metadata["conversion_factor"] = conversion_factor
+
+                        print(f"Resolved Keithley range for task '{task_name}' "
+                              f"channel '{channel_name}' ({keithley_sense}): {measurement_range} -> "
+                              f"conversion_factor = {conversion_factor}"
+                              )
+                    except Exception as exc:
+                        raise RuntimeError(f"Failed to read Keithley range for channel '{channel_name}': {exc}")

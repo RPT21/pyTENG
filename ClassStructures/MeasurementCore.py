@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 
 from PyQt5.QtWidgets import (QPushButton, QVBoxLayout, QWidget,
-                             QLabel, QSpinBox, QHBoxLayout, QFileDialog, QInputDialog, QGroupBox, QMessageBox)
+                             QLabel, QSpinBox, QHBoxLayout, QFileDialog, QGroupBox, QMessageBox)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, pyqtSlot
 
 from ClassStructures.BufferProcessor import BufferProcessor
@@ -31,6 +31,7 @@ def _default_daq_task(task_type="analog"):
                 "port_config": DAQmx_Val_Diff if task_type == "analog" else None,
                 "conversion_source": "none",
                 "conversion_factor": None,
+                "keithley_sense": "none",
             }
         },
         "TRIGGER_SOURCE": None,
@@ -205,9 +206,9 @@ class AcquisitionProgram(QWidget):
         ### ---------------- UI ELEMENTS ---------------- ###
 
         # Acquisition control button:
-        self.button = QPushButton("START LinMot")
-        self.button.setObjectName("primaryAction")
-        self.button.clicked.connect(self.trigger_acquisition)
+        self.acquisition_button = QPushButton("START LinMot")
+        self.acquisition_button.setObjectName("primaryAction")
+        self.acquisition_button.clicked.connect(self.trigger_acquisition)
         
         # Timer UI elements
         self.timer_label = QLabel("Duration (s):")
@@ -306,7 +307,7 @@ class AcquisitionProgram(QWidget):
         acquisition_layout.setContentsMargins(12, 18, 12, 12)
         acquisition_layout.setSpacing(12)
         acquisition_left = QVBoxLayout()
-        acquisition_left.addWidget(self.button)
+        acquisition_left.addWidget(self.acquisition_button)
         acquisition_left.addStretch(1)
         acquisition_right = QVBoxLayout()
         acquisition_right.addWidget(self.countdown_display)
@@ -338,6 +339,21 @@ class AcquisitionProgram(QWidget):
 
     def open_DAQProfilesWindow(self):
         self.DAQProfilesWindow.exec_()
+
+    @pyqtSlot(dict)
+    def ask_reset_codesys(self, dictionary):
+        reply = QMessageBox.question(
+            self,
+            dictionary["title"],
+            dictionary["message"],
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        dictionary["result"] = reply
+
+    @pyqtSlot(str)
+    def show_raspberry_error(self, txt):
+        QMessageBox.critical(self, "Raspberry Error", txt)
 
     def _sync_active_profile_label(self):
         self.daq_profile_label.setText(f"Active DAQ profile: {self.active_daq_profile_name}")
@@ -426,7 +442,7 @@ class AcquisitionProgram(QWidget):
 
     def update_countdown(self):
 
-        if self.dev_communicator.is_rb_connected:
+        if self.dev_communicator.raspberry:
             # It takes aprox 10e-5 seconds to read the status bits
             status_bit_0 = self.dev_communicator.DI_task_Raspberry_status_0.read_line()
             status_bit_1 = self.dev_communicator.DI_task_Raspberry_status_1.read_line()
@@ -490,7 +506,7 @@ class AcquisitionProgram(QWidget):
                     processor.Binary_to_Pickle()
 
                 # Merge the LinMot CSV files
-                if self.dev_communicator.is_rb_connected:
+                if self.dev_communicator.raspberry:
                     self.motor_file = CSV_merge(folder_path=self.local_path[0], exp_id=self.exp_id)
                 else:
                     self.motor_file = ""
@@ -525,17 +541,17 @@ class AcquisitionProgram(QWidget):
             shutil.rmtree(self.local_path[0])
 
     def update_button(self):
-        self.button.setText("STOP LinMot" if self.moveLinMot[0] else "START LinMot")
+        self.acquisition_button.setText("STOP LinMot" if self.moveLinMot[0] else "START LinMot")
 
     @pyqtSlot()
     def trigger_acquisition(self):
 
-        if self.sender() == self.button and self.automatic_mode:
+        if self.sender() == self.acquisition_button and self.automatic_mode:
             print("Automatic mode has been disabled, stopping acquisition.")
             self.automatic_mode = False
 
         if self.error_flag:
-            if self.sender() == self.button:
+            if self.sender() == self.acquisition_button:
                 self.error_flag = False
             else:
                 # STOP ADQUISITION
@@ -581,14 +597,38 @@ class AcquisitionProgram(QWidget):
             else:
                 self.tribu_id = None
 
+            # Ensure tribu_id is available from the Parameter Tree (must not be empty)
+            SampleIdTriboPos = self.ExpConfigWindow.metadata_param_tree.param('SampleIdTriboPos')
+            if SampleIdTriboPos is not None:
+                self.SampleIdTriboPos = SampleIdTriboPos.value()
+            else:
+                self.SampleIdTriboPos = None
+
+            # Ensure tribu_id is available from the Parameter Tree (must not be empty)
+            SampleIdTriboNeg = self.ExpConfigWindow.metadata_param_tree.param('SampleIdTriboNeg')
+            if SampleIdTriboNeg is not None:
+                self.SampleIdTriboNeg = SampleIdTriboNeg.value()
+            else:
+                self.SampleIdTriboNeg = None
+
             if not self.tribu_id:
-                QMessageBox.critical(self, "Missing TribuId", "TribuId is required. Open 'Edit Experiment Defaults' and set TribuId in the Parameter Tree.")
+                QMessageBox.critical(self, "Missing TribuId", "TribuId is required. Open 'Edit Experiment Parameters' and set TribuId in the Parameter Tree.")
                 print("\nNo TribuId found in parameter tree (ExpConfigWindow).")
+                return
+
+            if not self.SampleIdTriboPos:
+                QMessageBox.critical(self, "Missing SampleIdTriboPos", "SampleIdTriboPos is required. Open 'Edit Experiment Parameters' and check the Parameter Tree.")
+                print("\nNo SampleIdTriboPos found in parameter tree (ExpConfigWindow).")
+                return
+
+            if not self.SampleIdTriboNeg:
+                QMessageBox.critical(self, "Missing SampleIdTriboNeg", "SampleIdTriboNeg is required. Open 'Edit Experiment Parameters' and check the Parameter Tree.")
+                print("\nNo SampleIdTriboNeg found in parameter tree (ExpConfigWindow).")
                 return
 
             # Check if Keithley is required but not available
             if self._daq_tasks_require_keithley():
-                if not self.use_keithley:
+                if not self.dev_communicator.keithley:
                     error_msg = (
                         "One or more channels require Keithley conversion factor resolution, "
                         "but Keithley is not available.\n\n"
@@ -602,12 +642,29 @@ class AcquisitionProgram(QWidget):
                     return
 
             self.date_now = datetime.now().strftime("%d%m%Y_%H%M%S")
-            self.exp_id = f"{self.date_now}-{self.tribu_id}-{self.rload_id}"
+            self.exp_id = f"{self.date_now}-{self.rload_id}"
 
-            # Create necessary folders and define the saving path
-            os.makedirs(os.path.join(self.exp_dir, "RawData"), exist_ok=True)
-            self.local_path[0] = os.path.join(self.exp_dir, "RawData", self.exp_id)
-            os.makedirs(self.local_path[0], exist_ok=True)
+            # Create necessary folders and define the saving path - Structure: RawData/{TribuId}/{date}-{RloadId}/
+            tribu_folder_path = os.path.join(self.exp_dir, "RawData", self.tribu_id)
+
+            # Check if TribuId folder exists; if not, ask for confirmation
+            if not os.path.isdir(tribu_folder_path):
+                reply = QMessageBox.question(
+                    self,
+                    "Create New TribuId Folder",
+                    f"The TribuId folder '{self.tribu_id}' does not exist.\n\n"
+                    f"Do you want to create and use this folder?\n\n"
+                    f"Path: {tribu_folder_path}",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+
+                if reply == QMessageBox.No:
+                    print(f"Creation of TribuId folder '{self.tribu_id}' cancelled by user.")
+                    return
+
+            os.makedirs(os.path.join(self.exp_dir, "RawData", self.tribu_id, f"{self.SampleIdTriboNeg}-{self.SampleIdTriboPos}",self.exp_id), exist_ok=True)
+            self.local_path[0] = os.path.join(self.exp_dir, "RawData", self.tribu_id, f"{self.SampleIdTriboNeg}-{self.SampleIdTriboPos}",self.exp_id)
 
             # Open the files to save the data
             for processor in self.buffer_processors:
@@ -654,7 +711,7 @@ class AcquisitionProgram(QWidget):
             self.dev_communicator.DI_task_Raspberry_status_1.ClearTask()
 
             # Disconnect from Raspberry if connected
-            if self.dev_communicator.is_rb_connected:
+            if self.dev_communicator.raspberry:
                 self.dev_communicator.raspberry.disconnect()
 
             for thread in self.thread_savers:

@@ -61,7 +61,7 @@ class ExpConfigWindow(QDialog):
             limits = meta.get('limit', None)
             children.append({'name': col, 'type': ptype, 'value': value, 'default': default, "limits": limits})
 
-        self.metadata_param_tree = Parameter.create(name='ExperimentDefaults', type='group', children=children)
+        self.metadata_param_tree = Parameter.create(name='Experiment Parameters', type='group', children=children)
 
         # Replace Notes parameter with TextParameter for multi-line text
         notes_param = self.metadata_param_tree.param('Notes')
@@ -74,7 +74,7 @@ class ExpConfigWindow(QDialog):
         self.METADATA_COLUMNS = METADATA_COLUMNS
         self._snapshot_values = {}
 
-        self.setWindowTitle("Edit Experiment Defaults")
+        self.setWindowTitle("Edit Experiment Parameters")
         self.setMinimumSize(700, 500)
         self.setStyleSheet("""
                     QDialog {

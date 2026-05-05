@@ -61,7 +61,8 @@ class MetadataInterface:
         json_metadata = {
             "ExperimentId": self.mainWindow.exp_id,
             "DAQProfile": self.mainWindow.active_daq_profile_name,
-            "RaspberryConnected": self.mainWindow.dev_communicator.is_rb_connected,
+            "RaspberryConnected": True if self.mainWindow.dev_communicator.raspberry else False,
+            "KeithleyConnected": True if self.mainWindow.dev_communicator.keithley else False,
             "DAQTasks": self._normalize_daq_tasks_for_json(self.mainWindow.DAQ_TASKS_METADATA),
         }
 
@@ -166,7 +167,9 @@ class MetadataInterface:
                 f"\033[91mCould not save experiment row: experiment_data must contain 'excel_metadata' and 'json_metadata' dictionaries. \033[0m")
             return 1
 
-        folder_path = os.path.dirname(self.mainWindow.local_path[0])
+        # Excel file is saved in RawData root: RawData/Experiments.xlsx
+        # local_path[0] = RawData/{TribuId}/{date}-{RloadId}/{self.SampleIdTriboNeg}-{self.SampleIdTriboPos}/, so we go up 3 levels to get to RawData/
+        folder_path = os.path.dirname(os.path.dirname(os.path.dirname(self.mainWindow.local_path[0])))
         if not folder_path:
             print(f"\033[91mCould not save experiment row: invalid experiment folder path. \033[0m")
             return 1
