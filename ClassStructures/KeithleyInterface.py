@@ -1,4 +1,5 @@
 import pyvisa
+import time
 
 class KeithleyInterface:
     """Minimal Keithley helper to read the active measurement range.
@@ -52,6 +53,7 @@ class KeithleyInterface:
             "VOLT": "SENS:VOLT:RANG?",
             "CURR": "SENS:CURR:RANG?",
             "RES": "SENS:RES:RANG?",
+            "CHAR": "SENS:CHAR:RANG?",
         }
         if normalized not in sense_to_query:
             raise ValueError("sense must be one of: VOLT, CURR, RES")
@@ -61,12 +63,59 @@ class KeithleyInterface:
 
     @staticmethod
     def conversion_factor_from_range(measurement_range):
-        """Map Keithley range to conversion factor.
-
-        Current behavior is identity: conversion_factor = range.
-        """
-        return float(measurement_range)
+        """Map Keithley range to conversion factor."""
+        conversion_factor = measurement_range / 2
+        return conversion_factor
 
     def get_conversion_factor_from_keithley(self, sense="VOLT"):
         """Convenience method used by DAQ channel conversion-mode logic."""
         return self.conversion_factor_from_range(self.read_range(sense=sense))
+
+    def send_ren_line(self, command, wait_time=0.1):
+        """Send a command to the Keithley REN Control Bus Line."""
+        self._require_connection()
+        self._instrument.control_ren(command)
+        time.sleep(wait_time)
+
+    def send(self, command, wait_time=0.1):
+        """Send a command to the Keithley SCPI Bus."""
+        self._require_connection()
+        self._instrument.write(command)
+        time.sleep(wait_time)
+
+    def query(self, command, wait_time=0.1):
+        """Query a command to the Keithley SCPI Bus."""
+        self._require_connection()
+        data = self._instrument.query(command).strip()
+        time.sleep(wait_time)
+        return data
+
+    def wait_for_srq(self):
+        """Wait until status byte (bit 6) is active (SRQ)"""
+        while True:
+            try:
+                stb = self._instrument.stb  # Status Byte
+                if stb & 64:
+                    return
+            except Exception:
+                continue
+            time.sleep(0.2)
+
+    def set_manual_control(self, wait_time=0.1):
+        self._require_connection()
+        self._instrument.write(":SYST:LOC")
+        time.sleep(wait_time)
+
+    def set_remote_control(self, wait_time=0.1):
+        self._require_connection()
+        self._instrument.write(":SYST:REM")
+        time.sleep(wait_time)
+
+
+if __name__ == "__main__":
+    keithley = KeithleyInterface(resource_name="GPIB0::14::INSTR")
+    print("Device id:", keithley.connect())
+    print("Keithley range:", keithley.read_range(sense="VOLT"))
+    print("Conversion factor:", keithley.get_conversion_factor_from_keithley())
+    keithley.set_manual_control()
+    keithley.disconnect()
