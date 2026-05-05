@@ -41,14 +41,38 @@ class KeithleyInterface:
         if self._instrument is None:
             raise RuntimeError("Keithley is not connected. Call connect() first.")
 
-    def read_range(self, sense="VOLT"):
+    @staticmethod
+    def _normalize_sense(sense):
+        """Normalize user-facing sensing modes to Keithley sense tokens."""
+        normalized = str(sense).strip().lower().replace("-", "").replace(" ", "")
+        aliases = {
+            "none": "NONE",
+            "voltage": "VOLT",
+            "volt": "VOLT",
+            "v": "VOLT",
+            "current": "CURR",
+            "curr": "CURR",
+            "i": "CURR",
+            "impedance": "RES",
+            "resistance": "RES",
+            "res": "RES",
+            "charge": "CHAR",
+            "char": "CHAR",
+        }
+        return aliases.get(normalized, normalized.upper())
+
+    def read_range(self, sense="VOLT", manual_control=True):
         """Read the active range from the Keithley for a given sense type.
 
-        Supported values: VOLT, CURR, RES.
+        Supported values: none/voltage/current/impedance/charge or VOLT/CURR/RES/CHAR.
+        Returns None if sense is 'none'.
         """
         self._require_connection()
 
-        normalized = str(sense).strip().upper()
+        normalized = self._normalize_sense(sense)
+        if normalized == "NONE":
+            return None
+
         sense_to_query = {
             "VOLT": "SENS:VOLT:RANG?",
             "CURR": "SENS:CURR:RANG?",
@@ -56,20 +80,32 @@ class KeithleyInterface:
             "CHAR": "SENS:CHAR:RANG?",
         }
         if normalized not in sense_to_query:
-            raise ValueError("sense must be one of: VOLT, CURR, RES")
+            raise ValueError("sense must be one of: voltage, current, impedance, charge")
 
         raw_value = self._instrument.query(sense_to_query[normalized]).strip()
+
+        # After querying the range, Keithley is in remote mode. Return to manual control if requested.
+        if manual_control:
+            self.set_manual_control()
+
         return float(raw_value)
 
     @staticmethod
-    def conversion_factor_from_range(measurement_range):
+    def _conversion_factor_from_range(measurement_range):
         """Map Keithley range to conversion factor."""
         conversion_factor = measurement_range / 2
         return conversion_factor
 
-    def get_conversion_factor_from_keithley(self, sense="VOLT"):
-        """Convenience method used by DAQ channel conversion-mode logic."""
-        return self.conversion_factor_from_range(self.read_range(sense=sense))
+    def get_conversion_factor_from_keithley(self, sense="VOLT", manual_control=True):
+        """Convenience method used by DAQ channel conversion-mode logic.
+
+        Returns None if sense is 'none'.
+        """
+        measurement_range = self.read_range(sense=sense, manual_control=manual_control)
+        if measurement_range is None:
+            return None
+
+        return self._conversion_factor_from_range(measurement_range)
 
     def send_ren_line(self, command, wait_time=0.1):
         """Send a command to the Keithley REN Control Bus Line."""
@@ -115,7 +151,6 @@ class KeithleyInterface:
 if __name__ == "__main__":
     keithley = KeithleyInterface(resource_name="GPIB0::14::INSTR")
     print("Device id:", keithley.connect())
-    print("Keithley range:", keithley.read_range(sense="VOLT"))
-    print("Conversion factor:", keithley.get_conversion_factor_from_keithley())
-    keithley.set_manual_control()
+    print("Keithley range:", keithley.read_range(sense="VOLT", manual_control=False))
+    print("Conversion factor:", keithley.get_conversion_factor_from_keithley(sense="VOLT", manual_control=True))
     keithley.disconnect()
