@@ -74,12 +74,21 @@ def CSV_merge(folder_path, exp_id):
         # Concatenate CSV file
         combined_DataFrame = pd.concat([combined_DataFrame, df], ignore_index=True)
     
+    # Delete individual CSV files after successful merge
+    for file in files:
+        file_path = os.path.join(folder_path, file)
+        try:
+            os.remove(file_path)
+            print(f"Deleted: {file}")
+        except Exception as e:
+            print(f"Warning: Could not delete {file}: {e}")
+
     # Save concatenated DataFrame
     filename = f'Motor-{exp_id}.csv'
     combined_DataFrame.to_csv(os.path.join(folder_path, filename), index=False)
-    
+
     print("Data saved to location:", os.path.join(folder_path, filename), "\n")
-    
+
     return filename
 
 
