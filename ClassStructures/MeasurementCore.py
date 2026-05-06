@@ -67,6 +67,8 @@ class AcquisitionProgram(QWidget):
                  RESISTANCE_DATA=None,
                  exp_dir=None,
                  tribu_id=None,
+                 SampleIdTriboNeg=None,
+                 SampleIdTriboPos=None,
                  rload_id=None,
                  DAQ_CODE=(0, 0, 0, 0, 0, 1),
                  measure_time=30,
@@ -189,6 +191,28 @@ class AcquisitionProgram(QWidget):
         else:
             # Read current value from METADATA_COLUMNS
             self.tribu_id = self.METADATA_COLUMNS["TribuId"]["value"]
+
+        # Manage SampleIdTriboNeg via METADATA_COLUMNS.
+        if SampleIdTriboNeg:
+            if not isinstance(SampleIdTriboNeg, str):
+                SampleIdTriboNeg = str(SampleIdTriboNeg)
+            # If provided as parameter, set the live value in METADATA_COLUMNS
+            self.METADATA_COLUMNS["SampleIdTriboNeg"]["value"] = SampleIdTriboNeg
+            self.SampleIdTriboNeg = SampleIdTriboNeg
+        else:
+            # Read current value from METADATA_COLUMNS
+            self.SampleIdTriboNeg = self.METADATA_COLUMNS["SampleIdTriboNeg"]["value"]
+
+        # Manage SampleIdTriboPos via METADATA_COLUMNS.
+        if SampleIdTriboPos:
+            if not isinstance(SampleIdTriboPos, str):
+                SampleIdTriboPos = str(SampleIdTriboPos)
+            # If provided as parameter, set the live value in METADATA_COLUMNS
+            self.METADATA_COLUMNS["SampleIdTriboPos"]["value"] = SampleIdTriboPos
+            self.SampleIdTriboPos = SampleIdTriboPos
+        else:
+            # Read current value from METADATA_COLUMNS
+            self.SampleIdTriboPos = self.METADATA_COLUMNS["SampleIdTriboPos"]["value"]
 
         # Manage RloadId via METADATA_COLUMNS.
         if rload_id:
@@ -488,6 +512,7 @@ class AcquisitionProgram(QWidget):
                 self.countdown_display.setText(f"Remaining time: {self._format_remaining(self.remaining_seconds)}")
             else:
                 self.measurement_timer.stop()
+                self._elapsed_timer.invalidate()
                 self.countdown_display.setText("Remaining time: -")
                 self.should_save_data = True
                 self.trigger_acquisition()

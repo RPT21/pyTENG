@@ -110,8 +110,8 @@ DAQ_PROFILES = {
 
 METADATA_COLUMNS = {
     "TribuId": {"default": "", "value": "", "type": "str", "limits": None},
-    "SampleIdTriboPos": {"default": "", "value": "", "type": "str", "limits": None},
     "SampleIdTriboNeg": {"default": "", "value": "", "type": "str", "limits": None},
+    "SampleIdTriboPos": {"default": "", "value": "", "type": "str", "limits": None},
     "Date": {"default": None, "value": None, "type": "date", "limits": None},
     "Capacitorld": {"default": "none", "value": "none", "type": "str", "limits": None},
     "RloadId": {"default": "", "value": "", "type": "str", "limits": None},
@@ -155,10 +155,14 @@ if debug:
         exp_dir = r"C:\Users\rpieres\Desktop\Test"
     tribu_id = "PDMSvsNylon"
     rload_id = "R10"
+    SampleIdTriboNeg = "PDMS"
+    SampleIdTriboPos = "Nylon"
 else:
     exp_dir = None
     tribu_id = None
     rload_id = None
+    SampleIdTriboNeg = None
+    SampleIdTriboPos = None
 
 window = AcquisitionProgram(DAQ_PROFILES=DAQ_PROFILES,
                             METADATA_COLUMNS=METADATA_COLUMNS,
@@ -168,6 +172,8 @@ window = AcquisitionProgram(DAQ_PROFILES=DAQ_PROFILES,
                             exp_dir=exp_dir,
                             tribu_id=tribu_id,
                             rload_id=rload_id,
+                            SampleIdTriboNeg=SampleIdTriboNeg,
+                            SampleIdTriboPos=SampleIdTriboPos,
                             use_keithley=True,
                             use_raspberry=True,
                             keithley_resource_name='GPIB0::14::INSTR')
