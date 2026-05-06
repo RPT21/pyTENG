@@ -6,7 +6,7 @@ from datetime import datetime
 
 from PyQt5.QtWidgets import (QPushButton, QVBoxLayout, QWidget,
                              QLabel, QSpinBox, QHBoxLayout, QFileDialog, QGroupBox, QMessageBox)
-from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, pyqtSlot
+from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, QElapsedTimer, pyqtSlot
 
 from ClassStructures.BufferProcessor import BufferProcessor
 from ClassStructures.DeviceCommunicator import DeviceCommunicator
@@ -59,7 +59,7 @@ class AcquisitionProgram(QWidget):
     start_acquisition_return_signal = pyqtSignal()
     stop_acquisition_return_signal = pyqtSignal()
     update_button_signal = pyqtSignal()
-    
+
     def __init__(self,
                  METADATA_COLUMNS,
                  DAQ_PROFILES=None,
@@ -112,7 +112,7 @@ class AcquisitionProgram(QWidget):
             QComboBox::drop-down { border: 0; width: 24px; }
         """)
 
-        # Define the moveLinmot bool: 
+        # Define the moveLinmot bool:
         # We use a list because a bool is not referenced when passed as an argument
         self.moveLinMot = [False]
         self.xRecording = [False]
@@ -137,7 +137,8 @@ class AcquisitionProgram(QWidget):
 
         # Initialize DAQ profiles from None / dict / JSON file path.
         self.daq_profiles = _normalize_daq_profiles_source(DAQ_PROFILES)
-        self.active_daq_profile_name = "Default" if "Default" in self.daq_profiles else next(iter(self.daq_profiles.keys()))
+        self.active_daq_profile_name = "Default" if "Default" in self.daq_profiles else next(
+            iter(self.daq_profiles.keys()))
 
         # Plot parameters
         self.TimeWindowLength = TimeWindowLength
@@ -194,7 +195,7 @@ class AcquisitionProgram(QWidget):
             if not isinstance(rload_id, str):
                 rload_id = str(rload_id)
             # If provided as parameter, set the live value in METADATA_COLUMNS
-            self.METADATA_COLUMNS["RloadId"]["value"]  = rload_id
+            self.METADATA_COLUMNS["RloadId"]["value"] = rload_id
             self.rload_id = rload_id
         else:
             if not self.automatic_mode:
@@ -209,24 +210,48 @@ class AcquisitionProgram(QWidget):
         self.acquisition_button = QPushButton("START LinMot")
         self.acquisition_button.setObjectName("primaryAction")
         self.acquisition_button.clicked.connect(self.trigger_acquisition)
-        
-        # Timer UI elements
-        self.timer_label = QLabel("Duration (s):")
-        self.timer_spinbox = QSpinBox()
-        self.timer_spinbox.setRange(1, 86400)  # 1 sec to 24 hours
-        self.timer_spinbox.setValue(measure_time)  # Default value
+
+        # Timer UI elements — days / hours / minutes / seconds
+        self.timer_label = QLabel("Duration:")
+        self.timer_spinbox_days = QSpinBox()
+        self.timer_spinbox_hours = QSpinBox()
+        self.timer_spinbox_minutes = QSpinBox()
+        self.timer_spinbox_seconds = QSpinBox()
+        self.timer_spinbox_days.setRange(0, 365)
+        self.timer_spinbox_hours.setRange(0, 23)
+        self.timer_spinbox_minutes.setRange(0, 59)
+        self.timer_spinbox_seconds.setRange(0, 59)
+        self.timer_spinbox_days.setSuffix(" d")
+        self.timer_spinbox_hours.setSuffix(" h")
+        self.timer_spinbox_minutes.setSuffix(" m")
+        self.timer_spinbox_seconds.setSuffix(" s")
+        for sb in (self.timer_spinbox_days, self.timer_spinbox_hours,
+                   self.timer_spinbox_minutes, self.timer_spinbox_seconds):
+            sb.setFixedWidth(72)
+        # Set default value from measure_time (seconds)
+        _d, _rem = divmod(measure_time, 86400)
+        _h, _rem = divmod(_rem, 3600)
+        _m, _s = divmod(_rem, 60)
+        self.timer_spinbox_days.setValue(_d)
+        self.timer_spinbox_hours.setValue(_h)
+        self.timer_spinbox_minutes.setValue(_m)
+        self.timer_spinbox_seconds.setValue(_s)
         self.countdown_display = QLabel("Remaining time: -")
         self.countdown_display.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.duration = QHBoxLayout()
         self.duration.addWidget(self.timer_label)
-        self.duration.addWidget(self.timer_spinbox)
-        
+        self.duration.addWidget(self.timer_spinbox_days)
+        self.duration.addWidget(self.timer_spinbox_hours)
+        self.duration.addWidget(self.timer_spinbox_minutes)
+        self.duration.addWidget(self.timer_spinbox_seconds)
+
         # Timer setup
         self.measurement_timer = QTimer()
         self.measurement_timer.timeout.connect(self.update_countdown)
         self.remaining_seconds = 0
         self.should_save_data = False
-        
+        self._elapsed_timer = QElapsedTimer()
+
         # Buffer processor and thread for each DAQ Task
         self.buffer_processors = []
         self.thread_savers = []
@@ -443,35 +468,58 @@ class AcquisitionProgram(QWidget):
     def update_countdown(self):
 
         if self.dev_communicator.raspberry:
-            # It takes aprox 10e-5 seconds to read the status bits
+            # It takes aprox 1 ms to read the status bits
             status_bit_0 = self.dev_communicator.DI_task_Raspberry_status_0.read_line()
             status_bit_1 = self.dev_communicator.DI_task_Raspberry_status_1.read_line()
 
             if not (status_bit_0 == 1 and status_bit_1 == 0):
                 if not self.error_flag:
                     # An error has occurred during the data acquisition
-                    print(f"\033[91mError, during the acquisition, the Raspberry sent an error code:\033[0m", f"{status_bit_0}{status_bit_1}")
+                    print(f"\033[91mError, during the acquisition, the Raspberry sent an error code:\033[0m",
+                          f"{status_bit_0}{status_bit_1}")
                     self.error_flag = True
                     self.trigger_acquisition()
             
         if not self.error_flag:
+            elapsed_s = self._elapsed_timer.elapsed() / 1000.0  # ms → s
+            self.remaining_seconds = max(0, self._measure_time_target - int(elapsed_s))
+
             if self.remaining_seconds > 0 and self.moveLinMot[0]:
-                self.remaining_seconds -= 1
-                self.countdown_display.setText(f"Remaining time: {self.remaining_seconds} s")
+                self.countdown_display.setText(f"Remaining time: {self._format_remaining(self.remaining_seconds)}")
             else:
                 self.measurement_timer.stop()
                 self.countdown_display.setText("Remaining time: -")
                 self.should_save_data = True
                 self.trigger_acquisition()
 
+    def _get_duration_seconds(self):
+        """Return the total duration in seconds from the d/h/m/s spinboxes."""
+        return (self.timer_spinbox_days.value() * 86400 +
+                self.timer_spinbox_hours.value() * 3600 +
+                self.timer_spinbox_minutes.value() * 60 +
+                self.timer_spinbox_seconds.value())
+
+    @staticmethod
+    def _format_remaining(seconds):
+        """Format an integer number of seconds as DD:HH:MM:SS or HH:MM:SS."""
+        seconds = max(0, int(seconds))
+        d, rem = divmod(seconds, 86400)
+        h, rem = divmod(rem, 3600)
+        m, s = divmod(rem, 60)
+        if d > 0:
+            return f"{d}d {h:02d}:{m:02d}:{s:02d}"
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
     @pyqtSlot()
     def start_acquisition_return(self):
 
         if not self.error_flag:
-            self.remaining_seconds = self.timer_spinbox.value()
-            self.measure_time = self.timer_spinbox.value()
-            self.countdown_display.setText(f"Remaining time: {self.remaining_seconds} s")
-            self.measurement_timer.start(1000)  # 1 sec
+            self._measure_time_target = self._get_duration_seconds()
+            self.measure_time = self._measure_time_target
+            self.remaining_seconds = self._measure_time_target
+            self._elapsed_timer.start()
+            self.countdown_display.setText(f"Remaining time: {self._format_remaining(self.remaining_seconds)}")
+            self.measurement_timer.start(100)  # 100 ms
             self.should_save_data = False
 
             # Assign the plotter to the selected signal
@@ -586,7 +634,8 @@ class AcquisitionProgram(QWidget):
                     self.rload_id = None
 
             if not self.rload_id:
-                QMessageBox.critical(self, "Missing RloadId", "RloadId is required. Open 'Edit Experiment Defaults' and set RloadId in the Parameter Tree.")
+                QMessageBox.critical(self, "Missing RloadId",
+                                     "RloadId is required. Open 'Edit Experiment Defaults' and set RloadId in the Parameter Tree.")
                 print("\nNo RloadId found in parameter tree (ExpConfigWindow).")
                 return
 
@@ -612,17 +661,20 @@ class AcquisitionProgram(QWidget):
                 self.SampleIdTriboNeg = None
 
             if not self.tribu_id:
-                QMessageBox.critical(self, "Missing TribuId", "TribuId is required. Open 'Edit Experiment Parameters' and set TribuId in the Parameter Tree.")
+                QMessageBox.critical(self, "Missing TribuId",
+                                     "TribuId is required. Open 'Edit Experiment Parameters' and set TribuId in the Parameter Tree.")
                 print("\nNo TribuId found in parameter tree (ExpConfigWindow).")
                 return
 
             if not self.SampleIdTriboPos:
-                QMessageBox.critical(self, "Missing SampleIdTriboPos", "SampleIdTriboPos is required. Open 'Edit Experiment Parameters' and check the Parameter Tree.")
+                QMessageBox.critical(self, "Missing SampleIdTriboPos",
+                                     "SampleIdTriboPos is required. Open 'Edit Experiment Parameters' and check the Parameter Tree.")
                 print("\nNo SampleIdTriboPos found in parameter tree (ExpConfigWindow).")
                 return
 
             if not self.SampleIdTriboNeg:
-                QMessageBox.critical(self, "Missing SampleIdTriboNeg", "SampleIdTriboNeg is required. Open 'Edit Experiment Parameters' and check the Parameter Tree.")
+                QMessageBox.critical(self, "Missing SampleIdTriboNeg",
+                                     "SampleIdTriboNeg is required. Open 'Edit Experiment Parameters' and check the Parameter Tree.")
                 print("\nNo SampleIdTriboNeg found in parameter tree (ExpConfigWindow).")
                 return
 
@@ -644,7 +696,8 @@ class AcquisitionProgram(QWidget):
             self.date_now = datetime.now().strftime("%d%m%Y_%H%M%S")
             self.exp_id = f"{self.date_now}-{self.rload_id}"
 
-            # Create necessary folders and define the saving path - Structure: RawData/{TribuId}/{date}-{RloadId}/
+            # Create necessary folders and define the saving path
+            # Structure: RawData/{TribuId}/{self.SampleIdTriboNeg}-{self.SampleIdTriboPos}/{date}-{RloadId}/
             tribu_folder_path = os.path.join(self.exp_dir, "RawData", self.tribu_id)
 
             # Check if TribuId folder exists; if not, ask for confirmation
@@ -663,8 +716,10 @@ class AcquisitionProgram(QWidget):
                     print(f"Creation of TribuId folder '{self.tribu_id}' cancelled by user.")
                     return
 
-            os.makedirs(os.path.join(self.exp_dir, "RawData", self.tribu_id, f"{self.SampleIdTriboNeg}-{self.SampleIdTriboPos}",self.exp_id), exist_ok=True)
-            self.local_path[0] = os.path.join(self.exp_dir, "RawData", self.tribu_id, f"{self.SampleIdTriboNeg}-{self.SampleIdTriboPos}",self.exp_id)
+            self.local_path[0] = os.path.join(tribu_folder_path, f"{self.SampleIdTriboNeg}-{self.SampleIdTriboPos}",
+                                              self.exp_id)
+
+            os.makedirs(self.local_path[0], exist_ok=True)  # Note: Windows is letter case-insensitive
 
             # Open the files to save the data
             for processor in self.buffer_processors:
@@ -695,7 +750,7 @@ class AcquisitionProgram(QWidget):
                 self.dev_communicator.DO_task_LinMotTrigger.StopTask()
                 self.dev_communicator.DO_task_LinMotTrigger.ClearTask()
 
-            self.dev_communicator.DO_task_RelayCode.set_lines([0,0,0,0,0,0])
+            self.dev_communicator.DO_task_RelayCode.set_lines([0, 0, 0, 0, 0, 0])
             if not self.RelayCodeTask:
                 self.dev_communicator.DO_task_RelayCode.StopTask()
                 self.dev_communicator.DO_task_RelayCode.ClearTask()
@@ -732,7 +787,6 @@ class AcquisitionProgram(QWidget):
         if self.mainWindowParamGroups:
             for param_group in self.mainWindowParamGroups.values():
                 self._set_group_readonly(param_group, readonly=False)
-
 
         # Use the accept() method of the class QCloseEvent to close the QWidget (if not desired use the ignore() method)
         event.accept()
