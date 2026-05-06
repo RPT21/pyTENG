@@ -178,7 +178,13 @@ class MetadataInterface:
         file_path = os.path.join(folder_path, f"{base_filename}.xlsx")
         json_path = os.path.join(self.mainWindow.local_path[0], "experiment_metadata.json")
 
-        error_code = 0
+        try:
+            # Save JSON File
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(json_metadata, f, ensure_ascii=False, indent=2, default=str)
+        except Exception as e:
+            print(f"\033[91mCould not JSON File in {json_path}: {e} \033[0m")
+            return 1
 
         try:
             # Save Excel row
@@ -206,14 +212,6 @@ class MetadataInterface:
 
         except Exception as e:
             print(f"\033[91mCould not save experiment row in {file_path}: {e} \033[0m")
-            error_code = 1
+            return 1
 
-        try:
-            # Save JSON File
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(json_metadata, f, ensure_ascii=False, indent=2, default=str)
-        except Exception as e:
-            print(f"\033[91mCould not JSON File in {json_path}: {e} \033[0m")
-            error_code = 1
-
-        return error_code
+        return 0

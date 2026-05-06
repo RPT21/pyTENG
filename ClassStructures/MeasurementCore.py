@@ -604,10 +604,25 @@ class AcquisitionProgram(QWidget):
 
                 # Save the metadata
                 experiment_metadata = self.MetadataInterface.build_experiment_metadata()
-                metadata_error_code = self.MetadataInterface.save_metadata(experiment_metadata)
 
-                if metadata_error_code == 0:
-                    print("Experiment ended succesfully!")
+                while True:
+                    metadata_error_code = self.MetadataInterface.save_metadata(experiment_metadata)
+
+                    if metadata_error_code == 0:
+                        print("Experiment ended succesfully!")
+                        break
+                    else:
+                        retry = QMessageBox.critical(
+                            self,
+                            "Metadata Saving Error",
+                            "An error occurred while saving the metadata, check the Python Console for more details.\n\n"
+                            "Do you want to retry?",
+                            QMessageBox.Retry | QMessageBox.Abort,
+                            QMessageBox.Retry
+                        )
+                        if retry == QMessageBox.Abort:
+                            print("User aborted metadata saving after an error.")
+                            break
             else:
                 print("Experiment interrupted.")
 
@@ -624,12 +639,16 @@ class AcquisitionProgram(QWidget):
             print("Experiment interrupted due to an error.")
 
         # If no error and user has not aborted the measure, delete only temporal files
-        if not self.error_flag and self.should_save_data and metadata_error_code == 0:
+        if not self.error_flag and self.should_save_data:
             for processor in self.buffer_processors:
                 processor.remove_file()
         else:
             # Delete all files
             shutil.rmtree(self.local_path[0])
+
+        if self.error_flag:
+            txt = "An error has occurred during the acquisition, check the Python Console for more details."
+            QMessageBox.critical(self, "Acquisition Error", txt)
 
     def update_button(self):
         self.acquisition_button.setText("STOP LinMot" if self.moveLinMot[0] else "START LinMot")
