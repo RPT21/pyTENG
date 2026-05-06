@@ -40,9 +40,9 @@ class DeviceCommunicator(QObject):
 
             if not self.raspberry.connect():
                 self.raspberry = None
+                print("The program will work without using Raspberry Pi.")
         else:
             self.raspberry = None
-            print("The program will work without using Raspberry Pi.")
 
         # Connect to Keithley if desired:
         if self.mainWindow.use_keithley:
@@ -190,7 +190,8 @@ class DeviceCommunicator(QObject):
                                                  )
                         if dictionary["result"] == QMessageBox.No:
                             print(f"Acquisition aborted")
-                            return
+                            self.mainWindow.error_flag = True
+                            break
 
                         self.mainWindow.acquisition_button.setEnabled(False)
                         self.raspberry.reset_codesys()
@@ -220,7 +221,8 @@ class DeviceCommunicator(QObject):
                                                  )
                         if dictionary["result"] == QMessageBox.No:
                             print(f"Acquisition aborted")
-                            return
+                            self.mainWindow.error_flag = True
+                            break
 
                         self.mainWindow.acquisition_button.setEnabled(False)
                         self.raspberry.reset_codesys()
@@ -242,7 +244,12 @@ class DeviceCommunicator(QObject):
             if loop_counter >= max_iter:
                 self.DO_task_PrepareRaspberry.set_line(0)
                 self.mainWindow.error_flag = True
-                print("\033[91mError loop counter overflow, Raspberry is not responding\033[0m")
+                txt = "Error, Raspberry is not responding, check if it is connected"
+                QMetaObject.invokeMethod(self.mainWindow,
+                                         "show_raspberry_error",
+                                         Qt.ConnectionType.QueuedConnection,
+                                         Q_ARG(str, txt)
+                                         )
 
             if not self.mainWindow.acquisition_button.isEnabled():
                 self.mainWindow.acquisition_button.setEnabled(True)
