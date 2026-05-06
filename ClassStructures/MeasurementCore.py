@@ -584,6 +584,7 @@ class AcquisitionProgram(QWidget):
         for processor in self.buffer_processors:
             processor.close_file()
 
+        metadata_error_code = 0
         if not self.error_flag:
             if self.should_save_data:
 
@@ -599,9 +600,9 @@ class AcquisitionProgram(QWidget):
 
                 # Save the metadata
                 experiment_metadata = self.MetadataInterface.build_experiment_metadata()
-                error_code = self.MetadataInterface.save_metadata(experiment_metadata)
+                metadata_error_code = self.MetadataInterface.save_metadata(experiment_metadata)
 
-                if error_code == 0:
+                if metadata_error_code == 0:
                     print("Experiment ended succesfully!")
             else:
                 print("Experiment interrupted.")
@@ -618,8 +619,8 @@ class AcquisitionProgram(QWidget):
             self.update_button()
             print("Experiment interrupted due to an error.")
 
-        # Delete temporal files if no error, if error, delete all
-        if not self.error_flag:
+        # If no error and user has not aborted the measure, delete only temporal files
+        if not self.error_flag and self.should_save_data and metadata_error_code == 0:
             for processor in self.buffer_processors:
                 processor.remove_file()
         else:
