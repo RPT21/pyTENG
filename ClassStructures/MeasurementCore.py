@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 
 from PyQt5.QtWidgets import (QPushButton, QVBoxLayout, QWidget,
-                             QLabel, QSpinBox, QHBoxLayout, QFileDialog, QGroupBox, QMessageBox)
+                             QLabel, QSpinBox, QHBoxLayout, QFileDialog, QGroupBox, QMessageBox, QDesktopWidget)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, QElapsedTimer, pyqtSlot
 
 from ClassStructures.BufferProcessor import BufferProcessor
@@ -91,9 +91,10 @@ class AcquisitionProgram(QWidget):
                  keithley_resource_name=None):
 
         super().__init__(parent)
-        self.setWindowTitle("DAQ Viewer")
+        self.setWindowTitle("TENG Acquisition Software")
         self.layout = QVBoxLayout(self)
-        self.setMinimumSize(1180, 760)
+        self.setMinimumSize(1100, 900)
+        self.center()  # Call the center function to center the window on the screen
         self.layout.setContentsMargins(16, 16, 16, 16)
         self.layout.setSpacing(12)
         self.setStyleSheet("""
@@ -382,6 +383,18 @@ class AcquisitionProgram(QWidget):
         if self.automatic_mode:
             print("Starting acquisition in automatic mode.")
             self.trigger_acquisition()
+
+    def center(self):
+        # Get the screen geometry
+        screen_rect = QDesktopWidget().availableGeometry()
+        screen_center = screen_rect.center()
+
+        # Calculate the position of the window in the screen based on the window geometry
+        window_rect = self.frameGeometry()
+        window_rect.moveCenter(screen_center)
+
+        # Mover the window to this position
+        self.move(window_rect.topLeft())
 
     def open_ExpConfigWindow(self):
         self.ExpConfigWindow.exec_()
