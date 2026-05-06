@@ -417,6 +417,10 @@ class AcquisitionProgram(QWidget):
     def show_raspberry_error(self, txt):
         QMessageBox.critical(self, "Raspberry Error", txt)
 
+    @pyqtSlot(str)
+    def show_device_communicator_warning(self, txt):
+        QMessageBox.warning(self, "Device is missing", txt)
+
     def _sync_active_profile_label(self):
         self.daq_profile_label.setText(f"Active DAQ profile: {self.active_daq_profile_name}")
 

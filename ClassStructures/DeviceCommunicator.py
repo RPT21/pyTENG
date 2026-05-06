@@ -62,6 +62,36 @@ class DeviceCommunicator(QObject):
         else:
             self.keithley = None
 
+        if self.mainWindow.use_raspberry and self.mainWindow.use_keithley:
+            if not self.raspberry and not self.keithley:
+                txt = ("Keithley and Raspberry are not responding, check if they are turned on.\n\n"
+                       "The software will work without using them.")
+                QMetaObject.invokeMethod(self.mainWindow,
+                                         "show_device_communicator_warning",
+                                         Qt.ConnectionType.QueuedConnection,
+                                         Q_ARG(str, txt)
+                                         )
+
+        elif self.mainWindow.use_raspberry:
+            if not self.raspberry:
+                txt = ("Raspberry is not responding, check if it is turned on.\n\n"
+                       "The software will work without using Raspberry.")
+                QMetaObject.invokeMethod(self.mainWindow,
+                                         "show_device_communicator_warning",
+                                         Qt.ConnectionType.QueuedConnection,
+                                         Q_ARG(str, txt)
+                                         )
+
+        elif self.mainWindow.use_keithley:
+            if not self.keithley:
+                txt = ("Keithley is not responding, check if it is turned on.\n\n"
+                       "The software will work without using Keithley.")
+                QMetaObject.invokeMethod(self.mainWindow,
+                                         "show_device_communicator_warning",
+                                         Qt.ConnectionType.QueuedConnection,
+                                         Q_ARG(str, txt)
+                                         )
+
         self.start_acquisition_signal.connect(self.start_acquisition)
         self.stop_acquisition_signal.connect(self.stop_acquisition)
 
