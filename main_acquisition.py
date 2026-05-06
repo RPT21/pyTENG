@@ -146,7 +146,7 @@ resistance_list = [{'VALUE': 5,
 app = QApplication(sys.argv)
 
 # To debug, use this
-debug = True
+debug = False
 tribo_lab = True
 if debug:
     if tribo_lab:
