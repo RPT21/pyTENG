@@ -69,7 +69,7 @@ class BufferProcessor(QObject):
         else:
             print(f"Error: File DAQ_{self.task_name}_{self.task_type}.bin not found.")
 
-    def Binary_to_Pickle(self):
+    def Save_Data(self):
         """This function converts the numpy binary file to pandas dataframe and saves it as pickle file."""
 
         print(f"\nConverting DAQ_{self.task_name}_{self.task_type}.bin to Pickle ...")
@@ -89,7 +89,9 @@ class BufferProcessor(QObject):
 
         # Save the dataframe
         filename = f'DAQ-{self.task_name}_{self.task_type}-{self.mainWindow.exp_id}.pkl'
+        filename_excel = f'DAQ-{self.task_name}_{self.task_type}-{self.mainWindow.exp_id}.xlsx'
         df.to_pickle(os.path.join(self.local_path[0], filename))
+        df.to_excel(os.path.join(self.local_path[0], filename_excel), index=False)
 
         print("Data saved to location:", os.path.join(self.local_path[0], filename))
 

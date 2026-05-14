@@ -594,7 +594,7 @@ class AcquisitionProgram(QWidget):
 
                 # Convert the DAQ binary files to pandas dataframes
                 for processor in self.buffer_processors:
-                    processor.Binary_to_Pickle()
+                    processor.Save_Data()
 
                 # Merge the LinMot CSV files
                 if self.dev_communicator.raspberry:
