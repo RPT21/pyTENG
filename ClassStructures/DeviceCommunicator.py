@@ -72,6 +72,24 @@ class DeviceCommunicator(QObject):
                                          Q_ARG(str, txt)
                                          )
 
+            elif not self.raspberry:
+                txt = ("Raspberry is not responding, check if it is turned on.\n\n"
+                       "The software will work without using Raspberry.")
+                QMetaObject.invokeMethod(self.mainWindow,
+                                         "show_device_communicator_warning",
+                                         Qt.ConnectionType.QueuedConnection,
+                                         Q_ARG(str, txt)
+                                         )
+
+            elif not self.keithley:
+                txt = ("Keithley is not responding, check if it is turned on.\n\n"
+                       "The software will work without using Keithley.")
+                QMetaObject.invokeMethod(self.mainWindow,
+                                         "show_device_communicator_warning",
+                                         Qt.ConnectionType.QueuedConnection,
+                                         Q_ARG(str, txt)
+                                         )
+
         elif self.mainWindow.use_raspberry:
             if not self.raspberry:
                 txt = ("Raspberry is not responding, check if it is turned on.\n\n"
