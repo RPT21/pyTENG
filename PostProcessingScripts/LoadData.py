@@ -396,9 +396,9 @@ def LoadFiles(ExpPath):
 # -----------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    debug = True
+    debug = False
     if debug:
-        ExpPath = r"C:\Users\rpieres\Desktop\Test\RawData\03032026_170404-PDMSvsNylon-10"
+        ExpPath = r""
     else:
         logger0.req('Please select the data files to load.')
         root = tk.Tk()
@@ -410,6 +410,7 @@ if __name__ == '__main__':
     if ExpPath:
         ExpPath = os.path.normpath(ExpPath)
         dfData_all, Cycles_list = LoadFiles(ExpPath)
+        dfData_all.to_excel(os.path.join(ExpPath, 'Data.xlsx'), index=False)
         
         if dfData_all is not None:
             plt.figure(figsize=(12, 6))
