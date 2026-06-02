@@ -77,7 +77,7 @@ SHORT_CIRCUIT_CURRENT_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS": {
-            "Current": {"port": "Dev1/ai2", "port_config": DAQmx_Val_RSE, "conversion_source": "keithley", "conversion_factor": None, "keithley_sense": "current"},
+            "Current": {"port": "Dev1/ai2", "port_config": DAQmx_Val_Diff, "conversion_source": "keithley", "conversion_factor": None, "keithley_sense": "current"},
         },
 
         # "TRIGGER_SOURCE": "PFI0",
