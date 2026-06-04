@@ -66,6 +66,26 @@ R_LOAD_PROFILE = [
 ]
 
 app = QApplication(sys.argv)
+
+# To debug, use this
+debug = False
+tribo_lab = True
+if debug:
+    if tribo_lab:
+        exp_dir = r"C:\Users\mmartic\Desktop\RogerTest"
+    else:
+        exp_dir = r"C:\Users\rpieres\Desktop\Test"
+    tribu_id = "PDMSvsNylon"
+    rload_id = "R10"
+    SampleIdTriboNeg = "PDMS"
+    SampleIdTriboPos = "Nylon"
+else:
+    exp_dir = None
+    tribu_id = None
+    rload_id = None
+    SampleIdTriboNeg = None
+    SampleIdTriboPos = None
+
 w = R_LOAD_SWITCH(METADATA_COLUMNS=METADATA_COLUMNS,
                R_LOAD_PROFILE=R_LOAD_PROFILE,
                tribu_id="TribuTest",
