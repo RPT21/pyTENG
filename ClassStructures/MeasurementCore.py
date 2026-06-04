@@ -4,7 +4,7 @@ import copy
 import json
 from datetime import datetime
 
-from PyQt5.QtWidgets import (QPushButton, QVBoxLayout, QWidget,
+from PyQt5.QtWidgets import (QPushButton, QVBoxLayout, QDialog,
                              QLabel, QSpinBox, QHBoxLayout, QFileDialog, QGroupBox, QMessageBox, QDesktopWidget)
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, QTimer, QElapsedTimer, pyqtSlot
 
@@ -53,7 +53,7 @@ def _normalize_daq_profiles_source(daq_profiles):
 
     return daq_profiles
 
-class AcquisitionProgram(QWidget):
+class AcquisitionProgram(QDialog):
 
     trigger_acquisition_signal = pyqtSignal()
     start_acquisition_return_signal = pyqtSignal()
@@ -77,8 +77,6 @@ class AcquisitionProgram(QWidget):
                  TimeWindowLength=3,  # Time window length for the plot (seconds)
                  ScreenRefreshFrequency=60,  # Screen Refresh Rate (Hz)
                  parent=None,
-                 mainWindowButtons=None,
-                 mainWindowParamGroups=None,
                  RelayCodeTask=None,
                  LinMotTriggerTask=None,
                  LinMotTriggerLine="Dev1/port0/line7",
@@ -157,8 +155,6 @@ class AcquisitionProgram(QWidget):
         self.iteration_index = 0
         self.DAQ_CODE = DAQ_CODE
         self.xClose = False
-        self.mainWindowButtons = mainWindowButtons
-        self.mainWindowParamGroups = mainWindowParamGroups
         self.local_path = [""]
 
         # Check RESISTANCE_DATA when automatic_mode enabled
@@ -626,13 +622,7 @@ class AcquisitionProgram(QWidget):
             else:
                 print("Experiment interrupted.")
 
-            if self.automatic_mode:
-                if self.iteration_index <= self.iterations:
-                    self.trigger_acquisition()
-                else:
-                    print("All iterations finished, exiting.")
-                    self.close()
-            else:
+            if not self.automatic_mode:
                 self.update_button()
         else:
             self.update_button()
@@ -650,6 +640,14 @@ class AcquisitionProgram(QWidget):
             txt = "An error has occurred during the acquisition, check the Python Console for more details."
             QMessageBox.critical(self, "Acquisition Error", txt)
 
+        # Continue with the next Resistance Load if the program is in automatic mode (and no error found)
+        if not self.error_flag and self.automatic_mode:
+            if self.iteration_index <= self.iterations:
+                QTimer.singleShot(0, self.trigger_acquisition)
+            else:
+                print("All iterations finished, exiting.")
+                self.close()
+
     def update_button(self):
         self.acquisition_button.setText("STOP LinMot" if self.moveLinMot[0] else "START LinMot")
 
@@ -659,6 +657,10 @@ class AcquisitionProgram(QWidget):
         if self.sender() == self.acquisition_button and self.automatic_mode:
             print("Automatic mode has been disabled, stopping acquisition.")
             self.automatic_mode = False
+
+            if not self.moveLinMot[0]:
+                # Consider the case when it's waiting LinMot to return to origin position
+                return
 
         if self.error_flag:
             if self.sender() == self.acquisition_button:
@@ -671,9 +673,6 @@ class AcquisitionProgram(QWidget):
                 print("Stopped acquisition due to an error.")
                 return
 
-        if self.automatic_mode:
-            print(f"Starting the iteration {self.iteration_index} of {self.iterations}")
-
         if self.moveLinMot[0]:
             # STOP ADQUISITION
             self.measurement_timer.stop()
@@ -683,6 +682,7 @@ class AcquisitionProgram(QWidget):
             # START ADQUISITION
             if self.automatic_mode:
                 # automatic mode: take rload from RESISTANCE_DATA and write it into the Parameter Tree
+                print(f"Starting the iteration {self.iteration_index} of {self.iterations}")
                 self.rload_id = self.RESISTANCE_DATA[self.iteration_index]["RLOAD_ID"]
                 p = self.ExpConfigWindow.metadata_param_tree.param('RloadId')
                 if p is not None:
@@ -842,24 +842,8 @@ class AcquisitionProgram(QWidget):
                 shutil.rmtree(self.local_path[0])
                 print(f"Temporary folder {self.local_path[0]} deleted on exit.")
 
-        if self.mainWindowButtons:
-            for button in self.mainWindowButtons.values():
-                button.setEnabled(True)
-
-        if self.mainWindowParamGroups:
-            for param_group in self.mainWindowParamGroups.values():
-                self._set_group_readonly(param_group, readonly=False)
-
         # Use the accept() method of the class QCloseEvent to close the QWidget (if not desired use the ignore() method)
         event.accept()
-
-    def _set_group_readonly(self, group, readonly=True):
-        group.setReadonly(readonly)
-        for child in group.children():
-            if child.hasChildren():
-                self._set_group_readonly(child, readonly)
-            else:
-                child.setReadonly(readonly)
 
     def showEvent(self, event):
         super().showEvent(event)

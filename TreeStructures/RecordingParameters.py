@@ -24,21 +24,23 @@ class RecordingParameters(pTypes.GroupParameter):
                                                          'suffix': 's',
                                                          'limits': (0, None)})
 
-        self.SAMPLES_PER_CALLBACK_Parameter = Parameter.create(**{'name': "SAMPLES_PER_CALLBACK",
-                                                          'title': "SAMPLES_PER_CALLBACK",
-                                                          'type': 'int',
-                                                          'value': 100,
-                                                          'expanded': True,
-                                                          'step': 1,
-                                                          'limits': (0, None)})
+        self.DAQ_USB_TRANSFER_FREQUENCY_Parameter = Parameter.create(**{'name': "DAQ_USB_TRANSFER_FREQUENCY",
+                                                           'title': "DAQ USB Transfer Frequency",
+                                                           'type': 'int',
+                                                           'value': 60,
+                                                           'expanded': True,
+                                                           'step': 1,
+                                                           'suffix': 'Hz',
+                                                           'limits': (1, None)})
 
-        self.CALLBACKS_PER_BUFFER_Parameter = Parameter.create(**{'name': "CALLBACKS_PER_BUFFER",
-                                                          'title': "CALLBACKS_PER_BUFFER",
-                                                          'type': 'int',
-                                                          'value': 500,
-                                                          'expanded': True,
-                                                          'step': 1,
-                                                          'limits': (0, None)})
+        self.BUFFER_SAVING_TIME_INTERVAL_Parameter = Parameter.create(**{'name': "BUFFER_SAVING_TIME_INTERVAL",
+                                                           'title': "Buffer Saving Time Interval",
+                                                           'type': 'float',
+                                                           'value': 2.5,
+                                                           'expanded': True,
+                                                           'step': 0.1,
+                                                           'suffix': 's',
+                                                           'limits': (0.1, None)})
 
         self.TimeWindowLenghtParameter = Parameter.create(**{'name': "TimeWindowLenght",
                                                           'title': "TimeWindowLenght",
@@ -52,11 +54,11 @@ class RecordingParameters(pTypes.GroupParameter):
         self.RefreshRateParameter = Parameter.create(**{'name': "Refresh Rate",
                                                           'title': "Refresh Rate",
                                                           'type': 'int',
-                                                          'value': 10,
+                                                          'value': 60,
                                                           'expanded': True,
                                                           'step': 1,
-                                                          'suffix': 'ms',
-                                                          'limits': (0, None)})
+                                                          'suffix': 'Hz',
+                                                          'limits': (1, None)})
 
         self.LinMotTriggerLineParameter = Parameter.create(**{'name': "LinMotTriggerLine",
                                                           'title': "LinMotTriggerLine",
@@ -90,8 +92,8 @@ class RecordingParameters(pTypes.GroupParameter):
 
         self.addChild(self.SamplingRateParameter)
         self.addChild(self.MeasuringTimeParameter)
-        self.addChild(self.SAMPLES_PER_CALLBACK_Parameter)
-        self.addChild(self.CALLBACKS_PER_BUFFER_Parameter)
+        self.addChild(self.DAQ_USB_TRANSFER_FREQUENCY_Parameter)
+        self.addChild(self.BUFFER_SAVING_TIME_INTERVAL_Parameter)
         self.addChild(self.TimeWindowLenghtParameter)
         self.addChild(self.RefreshRateParameter)
         self.addChild(self.LinMotTriggerLineParameter)
@@ -99,4 +101,3 @@ class RecordingParameters(pTypes.GroupParameter):
         self.addChild(self.RaspberryStatus_0_LineParameter)
         self.addChild(self.RaspberryStatus_1_LineParameter)
         self.addChild(self.RelayCodeLinesParameter)
-

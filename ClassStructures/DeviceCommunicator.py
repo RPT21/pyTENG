@@ -408,11 +408,10 @@ class DeviceCommunicator(QObject):
             # Continue with the next Resistance Load if the program is in automatic mode (and no error found)
             if self.mainWindow.automatic_mode:
 
-                # Wait motor return to the origin position
-                self.mainWindow.update_button_signal.emit()
+                # Increase iteration_index
                 self.mainWindow.iteration_index += 1
 
-                # Increase iteration_index
+                # Wait motor return to the origin position
                 if self.mainWindow.iteration_index <= self.mainWindow.iterations:
                     print("Waiting LinMot to return to origin position")
                     time.sleep(5)
