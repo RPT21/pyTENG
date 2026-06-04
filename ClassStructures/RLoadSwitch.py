@@ -26,7 +26,8 @@ class R_LOAD_SWITCH(QWidget):
                  LinMotTriggerLine="Dev1/port0/line7",
                  tribu_id=None,
                  sample_id_neg=None,
-                 sample_id_pos=None):
+                 sample_id_pos=None,
+                 exp_dir=None):
         super(R_LOAD_SWITCH, self).__init__()
         self.layout = QVBoxLayout(self)
 
@@ -93,6 +94,10 @@ class R_LOAD_SWITCH(QWidget):
             self.ExperimentParams.child("SampleIdTriboNeg").setValue(str(sample_id_neg))
         if sample_id_pos is not None:
             self.ExperimentParams.child("SampleIdTriboPos").setValue(str(sample_id_pos))
+        if exp_dir:
+            self.exp_dir = exp_dir
+        else:
+            self.exp_dir = None
 
         # Definim el ParameterGroup ResistancePanel
         self.ResistancePanel = ResistancePanel(DO_task_RelayCode=self.DO_task_RelayCode,
@@ -239,6 +244,7 @@ class R_LOAD_SWITCH(QWidget):
                                                          tribu_id=tribu_id,
                                                          SampleIdTriboNeg=sample_id_neg,
                                                          SampleIdTriboPos=sample_id_pos,
+                                                         exp_dir=self.exp_dir,
                                                          use_keithley=False,
                                                          use_raspberry=True,
                                                          parent=self

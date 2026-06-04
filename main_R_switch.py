@@ -87,10 +87,10 @@ else:
     SampleIdTriboPos = None
 
 w = R_LOAD_SWITCH(METADATA_COLUMNS=METADATA_COLUMNS,
-               R_LOAD_PROFILE=R_LOAD_PROFILE,
-               tribu_id="TribuTest",
-               sample_id_neg="SampleNegTest",
-               sample_id_pos="SamplePosTest"
-               )
+                  R_LOAD_PROFILE=R_LOAD_PROFILE,
+                  tribu_id="TribuTest",
+                  sample_id_neg="SampleNegTest",
+                  sample_id_pos="SamplePosTest",
+                  exp_dir=exp_dir)
 w.show()
 sys.exit(app.exec_())
