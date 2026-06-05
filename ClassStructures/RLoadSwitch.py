@@ -185,11 +185,6 @@ class R_LOAD_SWITCH(QWidget):
             for param in self.ResistancePanel.ManualTriggering.children():
                 param.setValue(False)
 
-            sampling_rate = self.RecordingParameters.SamplingRateParameter.value()
-            if sampling_rate <= 0:
-                print("Sampling Rate must be > 0")
-                return
-
             daq_usb_transfer_frequency = self.RecordingParameters.DAQ_USB_TRANSFER_FREQUENCY_Parameter.value()
             buffer_saving_time_interval = self.RecordingParameters.BUFFER_SAVING_TIME_INTERVAL_Parameter.value()
 

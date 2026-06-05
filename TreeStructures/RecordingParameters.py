@@ -6,19 +6,10 @@ class RecordingParameters(pTypes.GroupParameter):
     def __init__(self, **kwargs):
         super(RecordingParameters, self).__init__(**kwargs)
 
-        self.SamplingRateParameter = Parameter.create(**{'name': "Sampling Rate",
-                                        'title': "Sampling Rate",
-                                        'type': 'int',
-                                        'value': 10000,
-                                        'expanded': True,
-                                        'step': 100,
-                                        'suffix': 'Hz',
-                                        'limits': (0, 100000)})
-
         self.MeasuringTimeParameter = Parameter.create(**{'name': "Measuring Time",
                                                          'title': "Measuring Time",
                                                          'type': 'int',
-                                                         'value': 30,
+                                                         'value': 5,
                                                          'expanded': True,
                                                          'step': 1,
                                                          'suffix': 's',
@@ -90,7 +81,6 @@ class RecordingParameters(pTypes.GroupParameter):
                                                           'value': "Dev1/port0/line0:5",
                                                           'expanded': True})
 
-        self.addChild(self.SamplingRateParameter)
         self.addChild(self.MeasuringTimeParameter)
         self.addChild(self.DAQ_USB_TRANSFER_FREQUENCY_Parameter)
         self.addChild(self.BUFFER_SAVING_TIME_INTERVAL_Parameter)
