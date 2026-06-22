@@ -261,14 +261,15 @@ class R_LOAD_SWITCH(QWidget):
 
         dictionary_parameters = read_excel(file_path = file_path)
 
+        # Convert to str all names
+        for n, name in enumerate(dictionary_parameters["NAME"]):
+            dictionary_parameters["NAME"][n] = str(name)
+
         # Update ParameterGroup ResistancePanel
         self.ResistancePanel = ResistancePanel(DO_task_RelayCode=self.DO_task_RelayCode,
                                                dictionary_parameters=dictionary_parameters,
                                                name='Resistance Panel',
                                                title='Resistance Panel')
-
-        # Update the reference of mainWindowParamGroups
-        self.mainWindowParamGroups["ResistancePanel"] = self.ResistancePanel
 
         # Set the new configuration
         self.ParameterTree_ControlPanel.setParameters(self.ResistancePanel)

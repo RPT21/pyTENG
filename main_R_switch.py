@@ -34,7 +34,7 @@ METADATA_COLUMNS = {
 
 R_LOAD_PROFILE = [
     {
-        "NAME": "R_LOAD",
+        "NAME": "R_SWITCH",
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS": {
