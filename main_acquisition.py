@@ -47,7 +47,7 @@ OPEN_CIRCUIT_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS": {
-            "Voltage": {"port": "Dev1/ai2", "port_config": DAQmx_Val_Diff, "conversion_source": "keithley", "conversion_factor": None, "keithley_sense": "voltage"},
+            "Voltage": {"port": "Dev1/ai2", "port_config": DAQmx_Val_Diff, "conversion_source": "none", "conversion_factor": None, "keithley_sense": "none"},
         },
 
         # "TRIGGER_SOURCE": "PFI0",
