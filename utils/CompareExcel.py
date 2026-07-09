@@ -22,6 +22,9 @@ file2 = filedialog.askopenfilename(
 df1 = pd.read_excel(file1)
 df2 = pd.read_excel(file2)
 
+# What we are measuring
+measure = "Voltage"
+
 # Clip first 10% and last 10%
 def clip_middle_80_percent(df):
     n = len(df)
@@ -33,8 +36,8 @@ df1 = clip_middle_80_percent(df1)
 df2 = clip_middle_80_percent(df2)
 
 # Common Y limits
-ymin = min(df1["Voltage"].min(), df2["Voltage"].min())
-ymax = max(df1["Voltage"].max(), df2["Voltage"].max())
+ymin = min(df1[measure].min(), df2[measure].min())
+ymax = max(df1[measure].max(), df2[measure].max())
 
 # Common X limits
 xmin = min(df1["Time (s)"].min(), df2["Time (s)"].min())
@@ -47,16 +50,16 @@ fig, (ax1, ax2) = plt.subplots(
     sharex=True
 )
 
-ax1.plot(df1["Time (s)"], df1["Voltage"], color="blue")
+ax1.plot(df1["Time (s)"], df1[measure], color="blue")
 ax1.set_title(os.path.basename(file1))
-ax1.set_ylabel("Voltage")
+ax1.set_ylabel(measure)
 ax1.set_ylim(ymin, ymax)
 ax1.set_xlim(xmin, xmax)
 ax1.grid(True)
 
-ax2.plot(df2["Time (s)"], df2["Voltage"], color="red")
+ax2.plot(df2["Time (s)"], df2[measure], color="red")
 ax2.set_title(os.path.basename(file2))
-ax2.set_ylabel("Voltage")
+ax2.set_ylabel(measure)
 ax2.set_xlabel("Time (s)")
 ax2.set_ylim(ymin, ymax)
 ax2.set_xlim(xmin, xmax)
