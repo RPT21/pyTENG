@@ -47,7 +47,7 @@ OPEN_CIRCUIT_PROFILE = [
         "SAMPLE_RATE": 10000,
 
         "DAQ_CHANNELS": {
-            "Voltage": {"port": "Dev1/ai2", "port_config": DAQmx_Val_Diff, "conversion_source": "none", "conversion_factor": None, "keithley_sense": "none"},
+            "Voltage": {"port": "Dev1/ai3", "port_config": DAQmx_Val_Diff, "conversion_source": "none", "conversion_factor": None, "keithley_sense": "none"},
         },
 
         # "TRIGGER_SOURCE": "PFI0",
@@ -101,11 +101,42 @@ SHORT_CIRCUIT_CURRENT_PROFILE = [
     }
 ]
 
+R_LOAD_CURRENT_PROFILE = [
+    {
+        "NAME": "R Load Current",
+        "SAMPLE_RATE": 10000,
+
+        "DAQ_CHANNELS": {
+            "Current": {"port": "Dev1/ai2", "port_config": DAQmx_Val_Diff, "conversion_source": "keithley", "conversion_factor": None, "keithley_sense": "current"},
+        },
+
+        # "TRIGGER_SOURCE": "PFI0",
+        "TRIGGER_SOURCE": None,
+
+        "TYPE": "analog"
+    },
+
+    {
+        "NAME": "Digital Synchronization",
+        "SAMPLE_RATE": 10000,
+
+        "DAQ_CHANNELS": {
+            "LinMot_Enable": {"port": "Dev2/port0/line0", "port_config": None, "conversion_source": "none", "conversion_factor": None, "keithley_sense": "none"},
+            "LinMot_Up_Down": {"port": "Dev2/port0/line1", "port_config": None, "conversion_source": "none", "conversion_factor": None, "keithley_sense": "none"},
+        },
+
+        # "TRIGGER_SOURCE": "PFI0",
+        "TRIGGER_SOURCE": None,
+        "TYPE": "digital"
+    }
+]
+
 # Build DAQ_PROFILES mapping (Default + VR, VOC, ISC copies)
 DAQ_PROFILES = {
     "VR": R_LOAD_PROFILE,
     "VOC": OPEN_CIRCUIT_PROFILE,
     "ISC": SHORT_CIRCUIT_CURRENT_PROFILE,
+    "IR": R_LOAD_CURRENT_PROFILE
 }
 
 METADATA_COLUMNS = {
