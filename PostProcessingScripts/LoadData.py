@@ -248,19 +248,19 @@ def FindCycles(df):
 # LOAD AND SYNCHRONIZE RAWDATA FILES
 # -----------------------------------------------------------------------------
 
-def LoadFiles(ExpPath):
+def ExtractCycles(ExpPath):
     '''
     Loads and synchronizes Motor and DAQ data files, returning combined cycles data.
     
     Parameters
     ----------
-    ExpDef : object
-        An object with attributes 'MotorFile' and 'DaqFile' which correspond to file paths.
+    ExpPath : str
+        Path to the experiment directory containing the data files.
     
     Returns
     -------
-    tuple (pd.DataFrame, list)
-        Combined data of all cycles and a list of (cicles_index, DataFrame) tuples.
+    Cycles : list[pd.DataFrame]
+        List of DataFrames, each containing data for a single cycle.
     '''
     # Load Motor data
     dfMot = LoadMotorFile(ExpPath)
@@ -386,10 +386,7 @@ def LoadFiles(ExpPath):
         # Keep the resulting cycle
         Cycles.append(dfcyD)
     
-    dfData_all = pd.concat(Cycles, ignore_index=True)
-    Cycles_list = list(enumerate(Cycles))
-    
-    return dfData_all, Cycles_list
+    return Cycles
 
 # %% --------------------------------------------------------------------------
 # LOAD RAWDATA FILES AND PLOT POSITION AND VOLTAGE
@@ -409,7 +406,8 @@ if __name__ == '__main__':
     
     if ExpPath:
         ExpPath = os.path.normpath(ExpPath)
-        dfData_all, Cycles_list = LoadFiles(ExpPath)
+        Cycles_list = ExtractCycles(ExpPath)
+        dfData_all = pd.concat(Cycles_list, ignore_index=True)
         dfData_all.to_excel(os.path.join(ExpPath, 'Data.xlsx'), index=False)
         
         if dfData_all is not None:
