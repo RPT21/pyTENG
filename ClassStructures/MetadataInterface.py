@@ -10,6 +10,7 @@ from PyDAQmx.DAQmxConstants import (DAQmx_Val_RSE, DAQmx_Val_Volts, DAQmx_Val_Di
                                     DAQmx_Val_GroupByChannel, DAQmx_Val_ChanForAllLines)
 
 class MetadataInterface:
+    DATE_EXCEL_FORMAT = "yyyy-mm-dd hh:mm:ss"
 
     def __init__(self, mainWindowReference):
         self.mainWindow = mainWindowReference
@@ -40,7 +41,7 @@ class MetadataInterface:
     def build_experiment_metadata(self):
         """Build the experiment metadata split into Excel and JSON payloads."""
         try:
-            date_value = datetime.strptime(self.mainWindow.date_now, "%d%m%Y_%H%M%S").date()
+            date_value = datetime.strptime(self.mainWindow.date_now, "%d%m%Y_%H%M%S")
         except Exception:
             date_value = self.mainWindow.date_now
 
@@ -88,6 +89,8 @@ class MetadataInterface:
             col_letter = get_column_letter(col_idx)
             # Set width based on header length, with a minimum of 15 and maximum of 50
             width = max(15, min(len(header) + 3, 50))
+            if header == "Date":
+                width = max(width, 20)
             ws.column_dimensions[col_letter].width = width
 
             # Apply header styling to the first row
@@ -108,6 +111,18 @@ class MetadataInterface:
             for cell in row:
                 cell.alignment = center_alignment
 
+    def _apply_date_format(self, ws):
+        """Apply a human-readable date-time format to the Date column in Excel."""
+        try:
+            date_col_idx = list(self.mainWindow.METADATA_COLUMNS.keys()).index("Date") + 1
+        except ValueError:
+            return
+
+        for row_idx in range(2, ws.max_row + 1):
+            cell = ws.cell(row=row_idx, column=date_col_idx)
+            if cell.value is not None:
+                cell.number_format = self.DATE_EXCEL_FORMAT
+
     def _ensure_experiment_workbook(self, file_path):
         """Create or normalize the workbook so it contains exactly the metadata columns."""
         if not os.path.isfile(file_path):
@@ -119,6 +134,7 @@ class MetadataInterface:
             # Set column widths and apply center alignment
             self._set_column_widths(ws)
             self._apply_center_alignment(ws)
+            self._apply_date_format(ws)
             wb.save(file_path)
             return
 
@@ -151,6 +167,7 @@ class MetadataInterface:
         # Set column widths and apply center alignment
         self._set_column_widths(new_ws)
         self._apply_center_alignment(new_ws)
+        self._apply_date_format(new_ws)
         new_wb.save(file_path)
 
     def save_metadata(self, experiment_data, base_filename="Experiments"):
@@ -206,6 +223,7 @@ class MetadataInterface:
             # Set column widths and apply center alignment
             self._set_column_widths(ws)
             self._apply_center_alignment(ws)
+            self._apply_date_format(ws)
 
             # Save Excel File
             wb.save(file_path)
