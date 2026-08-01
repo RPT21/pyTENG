@@ -265,12 +265,12 @@ def ExtractCycles(ExpPath):
     # Load Motor data
     dfMot = LoadMotorFile(ExpPath)
     if dfMot is None:
-        return None, None
+        return None
     
     # Load DAQ data
     dfDaq = LoadDAQData(ExpPath)
     if dfDaq is None:
-        return None, None
+        return None
     
     # Motor sampling rate
     MotFs = 1 / dfMot['Time'].diff().mean()
